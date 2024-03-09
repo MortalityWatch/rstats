@@ -12,6 +12,6 @@ fc <- df_bl |>
 fabletools::hilo(fc, 95) |>
   unpack_hilo(cols = `95%`) |>
   as_tibble() |>
-  select(.mean, "95%_lower", "95%_upper") |>
-  setNames(c("mean", "lower", "upper")) |>
+  select("95%_lower", "95%_upper") |>
+  setNames(c("lower", "upper")) |>
   mutate_if(is.numeric, round, 1)
