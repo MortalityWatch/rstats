@@ -7,6 +7,7 @@ library(tsibble)
 port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "3000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 app$header("Access-Control-Allow-Origin", "*")
+app$header("Cache-Control", "max-age=86400") # Cache 1d
 
 app$on("request", function(server, request, ...) {
   y <- as.double(strsplit(request$query$y, ",")[[1]])
