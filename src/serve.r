@@ -3,7 +3,8 @@ library(fable)
 library(tidyverse)
 library(fiery)
 
-app <- Fire$new(host = "0.0.0.0", port = 3000)
+port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "3000")
+app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
 app$on("request", function(server, request, ...) {
   y <- as.double(strsplit(request$query$y, ",")[[1]])
@@ -14,7 +15,7 @@ app$on("request", function(server, request, ...) {
   # Sample
   # y <- c(878.6, 866.4, 864.9)
   # h <- 3
-  # t <- FALSE
+  # t <- TRUE
   # s <- FALSE
 
   df_bl <- tibble(x = seq.int(1, length(y)), y = y) |> as_tsibble(index = x)
@@ -45,7 +46,9 @@ app$on("request", function(server, request, ...) {
   result <- bind_rows(tibble(y = bl$.mean), result)
 
   response <- request$respond()
-  response$body <- jsonlite::toJSON(result, auto_unbox = TRUE, pretty = TRUE)
+  response$body <- jsonlite::toJSON(
+    list(y = result$y, lower = result$lower, upper = result$upper)
+  )
   response$status <- 200L
   response$type <- "json"
   response

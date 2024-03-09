@@ -14,5 +14,5 @@ RUN /opt/rstats/install_r_deps.sh
 
 COPY src/ .
 
-EXPOSE 3000
+EXPOSE 80
 CMD [ "Rscript", "serve.r"]
