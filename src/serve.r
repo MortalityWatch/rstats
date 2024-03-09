@@ -34,13 +34,13 @@ app$on("request", function(server, request, ...) {
   fun <- ifelse(n, NAIVE, TSLM)
   df_bl <- df_bl |> as_tsibble(index = x)
   if (t) {
-    if (s > 1) {
+    if (!n && s > 1) {
       m <- df_bl |> model(fun(y ~ trend() + season()))
     } else {
       m <- df_bl |> model(fun(y ~ trend()))
     }
   } else {
-    if (s > 1) {
+    if (!n && s > 1) {
       m <- df_bl |> model(fun(y ~ season()))
     } else {
       m <- df_bl |> model(fun(y))
