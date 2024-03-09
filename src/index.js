@@ -1,9 +1,11 @@
 import express from 'express'
 import R from 'r-script'
 import path from 'path'
+import cors from 'cors'
 
 const app = express()
 const port = process.env.PORT || 3000
+app.use(cors())
 
 app.get('/', (_req, res) => res.sendStatus(200))
 
