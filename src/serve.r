@@ -16,13 +16,6 @@ app$on("request", function(server, request, ...) {
   s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
   n <- as.logical(request$query$n) # Naive
 
-  # Sample
-  # y <- c(709.9, 684.9, 686.9)
-  # h <- 5
-  # s <- 1
-  # t <- FALSE
-  # n <- TRUE
-
   df_bl <- tibble(x = seq.int(1, length(y)), y = y)
   if (s == 2) {
     df_bl$x <- make_yearquarter(2000, 1) + 0:(length(y) - 1)
@@ -57,7 +50,7 @@ app$on("request", function(server, request, ...) {
     select(.mean, "95%_lower", "95%_upper") |>
     setNames(c("y", "lower", "upper"))
   result <- bind_rows(tibble(y = bl$.mean), result) |>
-    mutate_if(is.numeric, round, 1)
+    mutate_if(is.numeric, round, 3)
 
   response <- request$respond()
   response$body <- jsonlite::toJSON(
