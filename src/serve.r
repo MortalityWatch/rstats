@@ -50,6 +50,7 @@ lm_predict_tslm <- function(model, newdata, diag = TRUE) {
 
   # 3) Residual
   res <- residuals(model)$.resid
+  res[is.na(res)] <- 0
   n <- length(res) # number of observations
   p <- nrow(coef(model)) # number of parameters
   df_residual <- n - p
@@ -120,19 +121,12 @@ app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 app$header("Access-Control-Allow-Origin", "*")
 app$header("Cache-Control", "max-age=86400") # Cache 1d
 
-handleForecast <- function(request) {
+handleForecast <- function(y, h, t, s, n) {
   # y <- c(178.1, 185.1, 208.1, 185.4, 166.3, 180.9, 207.3, 179.3, 163.3, 174.4, 191.9, 167.3, 159.1, 176.8, 199.6, 178.3, 164.5, 173.9, 199.1, 170.2, 153.4, 168.4, 187.5, 169.1, 158.6, 177.7, 204.5, 167.7, 158.9, 173, 185.4, 164.6, 157, 178.5, 186.8, 161.7)
   # h <- 17
   # t <- TRUE
   # s <- 2
   # n <- FALSE
-
-  y <- as.double(strsplit(request$query$y, ",")[[1]])
-  h <- as.integer(request$query$h)
-  t <- as.logical(request$query$t)
-  s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
-  n <- as.logical(request$query$n) # Naive
-
   df_bl <- tibble(x = seq.int(1, length(y)), y = y)
   if (s == 2) {
     df_bl$x <- make_yearquarter(2000, 1) + 0:(length(y) - 1)
@@ -169,23 +163,22 @@ handleForecast <- function(request) {
   result <- bind_rows(tibble(y = bl$.mean), result) |>
     mutate_if(is.numeric, round, 1)
 
-  response <- request$respond()
-  response$body <- jsonlite::toJSON(
-    list(y = result$y, lower = result$lower, upper = result$upper)
-  )
-  response$status <- 200L
-  response$type <- "json"
-  response
+  list(y = result$y, lower = result$lower, upper = result$upper)
 }
 
-cumForecastN <- function(df_train, df_test) {
+cumForecastN <- function(df_train, df_test, t) {
   # Model: Lin. regr.
   # model <- lm(y ~ x, data = df_train)
-  model <- df_train |> model(lm = TSLM(y ~ trend()))
+  if (t) {
+    m <- df_train |> model(lm = TSLM(y ~ trend()))
+  } else {
+    m <- df_train |> model(lm = TSLM(y))
+  }
+  # model <- df_train |> model(lm = TSLM(y ~ trend()))
 
   # Forecast
   # oo <- lm_predict(model, df_test, FALSE)
-  oo <- lm_predict_tslm(model, df_test, FALSE)
+  oo <- lm_predict_tslm(model = m, newdata = df_test, FALSE)
 
   fc_sum_mean <- sum(oo$fit)
   fc_sum_variance <- sum(oo$var.fit)
@@ -193,38 +186,46 @@ cumForecastN <- function(df_train, df_test) {
   n <- ncol(lengths(oo$var.fit))
   res <- agg_pred(rep.int(x = 1, length(oo$fit)), oo, alpha = .95)
   tibble(
-    actual = round(sum(df_test$y), 1),
-    predicted = round(fc_sum_mean, 1),
+    y = round(fc_sum_mean, 1),
     lower = round(res$PI[1], 1),
     upper = round(res$PI[2], 1)
   )
 }
 
-handleCumulativeForecast <- function(request) {
-  y <- as.double(strsplit(request$query$y, ",")[[1]])
-  h <- as.integer(request$query$h)
-  m <- as.integer(request$query$m)
-
+handleCumulativeForecast <- function(y, h, t) {
   # USA
   # y <- c(878.6, 866.4, 864.9, 1017.8, 1029.5, 961.5, 896.2)
   # h <- 4
-  # m <- 3
+  # t <- FALSE
 
   z <- length(y) - h
 
   df <- tibble(x = seq.int(1, length(y)), y = y) |> as_tsibble(index = x)
   df_train <- df |> filter(x <= z)
-  if (m == 1) {
-    df_train$y <- rep(last(df_train$y), length(df_train$y))
-  } else if (m == 2) {
-    df_train$y <- rep(mean(df_train$y), length(df_train$y))
-  }
-
-  res <- tibble()
-  h_ <- 1
+  result <- tibble()
   for (h_ in 1:h) {
     df_test <- df |> filter(x %in% (z + 1):(z + h_))
-    res <- rbind(res, cumForecastN(df_train, df_test))
+    result <- rbind(result, cumForecastN(df_train, df_test, t))
+  }
+
+  list(y = result$y, lower = result$lower, upper = result$upper)
+}
+
+app$on("request", function(server, request, ...) {
+  y <- as.double(strsplit(request$query$y, ",")[[1]])
+  h <- as.integer(request$query$h)
+  t <- as.logical(request$query$t)
+
+  if (request$path == "/") {
+    s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
+    n <- as.logical(request$query$n) # Naive
+    res <- handleForecast(y, h, t, n, s)
+  } else if (request$path == "/cum") {
+    res <- handleCumulativeForecast(y, h, t)
+  } else {
+    # Handle other routes
+    server$status(404)
+    server$send("Route not found")
   }
 
   # Response
@@ -233,19 +234,6 @@ handleCumulativeForecast <- function(request) {
   response$status <- 200L
   response$type <- "json"
   response
-}
-
-app$on("request", function(server, request, ...) {
-  print(request$path)
-  if (request$path == "/") {
-    handleForecast(request)
-  } else if (request$path == "/cum") {
-    handleCumulativeForecast(request)
-  } else {
-    # Handle other routes
-    server$status(404)
-    server$send("Route not found")
-  }
 })
 
 app$ignite(showcase = FALSE)
