@@ -178,29 +178,7 @@ handleForecast <- function(request) {
   response
 }
 
-handleCumulativeForecast <- function(request) {
-  y <- as.double(strsplit(request$query$y, ",")[[1]])
-  h <- as.integer(request$query$h)
-  m <- as.integer(request$query$m)
-
-  # USA
-  # y <- c(878.6, 866.4, 864.9, 1017.8, 1029.5, 961.5, 896.2)
-  # h <- 4
-  # m <- 3
-
-  z <- length(y) - h
-
-  df_bl <- tibble(x = seq.int(1, length(y)), y = y) |> as_tsibble(index = x)
-  # Split data into training and test
-  df_train <- df_bl |> filter(x <= z)
-  df_test <- df_bl |> filter(x > z)
-
-  if (m == 1) {
-    df_train$y <- rep(last(df_train$y), length(df_train$y))
-  } else if (m == 2) {
-    df_train$y <- rep(mean(df_train$y), length(df_train$y))
-  }
-
+cumForecastN <- function(df_train, df_test) {
   # Model: Lin. regr.
   # model <- lm(y ~ x, data = df_train)
   model <- df_train |> model(lm = TSLM(y ~ trend()))
@@ -214,17 +192,44 @@ handleCumulativeForecast <- function(request) {
 
   n <- ncol(lengths(oo$var.fit))
   res <- agg_pred(rep.int(x = 1, length(oo$fit)), oo, alpha = .95)
+  tibble(
+    actual = round(sum(df_test$y), 1),
+    predicted = round(fc_sum_mean, 1),
+    lower = round(res$PI[1], 1),
+    upper = round(res$PI[2], 1)
+  )
+}
+
+handleCumulativeForecast <- function(request) {
+  y <- as.double(strsplit(request$query$y, ",")[[1]])
+  h <- as.integer(request$query$h)
+  m <- as.integer(request$query$m)
+
+  # USA
+  # y <- c(878.6, 866.4, 864.9, 1017.8, 1029.5, 961.5, 896.2)
+  # h <- 4
+  # m <- 3
+
+  z <- length(y) - h
+
+  df <- tibble(x = seq.int(1, length(y)), y = y) |> as_tsibble(index = x)
+  df_train <- df |> filter(x <= z)
+  if (m == 1) {
+    df_train$y <- rep(last(df_train$y), length(df_train$y))
+  } else if (m == 2) {
+    df_train$y <- rep(mean(df_train$y), length(df_train$y))
+  }
+
+  res <- tibble()
+  h_ <- 1
+  for (h_ in 1:h) {
+    df_test <- df |> filter(x %in% (z + 1):(z + h_))
+    res <- rbind(res, cumForecastN(df_train, df_test))
+  }
 
   # Response
   response <- request$respond()
-  response$body <- jsonlite::toJSON(
-    tibble(
-      actual = round(sum(df_test$y), 1),
-      predicted = round(fc_sum_mean, 1),
-      lower = round(res$PI[1], 1),
-      upper = round(res$PI[2], 1)
-    )
-  )
+  response$body <- jsonlite::toJSON(res)
   response$status <- 200L
   response$type <- "json"
   response
