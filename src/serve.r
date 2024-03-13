@@ -121,39 +121,40 @@ app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 app$header("Access-Control-Allow-Origin", "*")
 app$header("Cache-Control", "max-age=86400") # Cache 1d
 
-handleForecast <- function(y, h, t, s, n) {
-  # y <- c(178.1, 185.1, 208.1, 185.4, 166.3, 180.9, 207.3, 179.3, 163.3, 174.4, 191.9, 167.3, 159.1, 176.8, 199.6, 178.3, 164.5, 173.9, 199.1, 170.2, 153.4, 168.4, 187.5, 169.1, 158.6, 177.7, 204.5, 167.7, 158.9, 173, 185.4, 164.6, 157, 178.5, 186.8, 161.7)
-  # h <- 17
+handleForecast <- function(y, h, s, t, n) {
+  # y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
+  # h <- 5
+  # s <- 1
   # t <- TRUE
-  # s <- 2
   # n <- FALSE
-  df_bl <- tibble(x = seq.int(1, length(y)), y = y)
+
+  df <- tibble(x = seq.int(1, length(y)), y = y)
   if (s == 2) {
-    df_bl$x <- make_yearquarter(2000, 1) + 0:(length(y) - 1)
+    df$x <- make_yearquarter(2000, 1) + 0:(length(y) - 1)
   } else if (s == 3) {
-    df_bl$x <- make_yearmonth(2000, 1) + 0:(length(y) - 1)
+    df$x <- make_yearmonth(2000, 1) + 0:(length(y) - 1)
   } else if (s == 4) {
-    df_bl$x <- make_yearweek(2000, 1) + 0:(length(y) - 1)
+    df$x <- make_yearweek(2000, 1) + 0:(length(y) - 1)
   }
 
   fun <- ifelse(n, NAIVE, TSLM)
-  df_bl <- df_bl |> as_tsibble(index = x)
+  df <- df |> as_tsibble(index = x)
   if (t) {
     if (!n && s > 1) {
-      m <- df_bl |> model(fun(y ~ trend() + season()))
+      m <- df |> model(fun(y ~ trend() + season()))
     } else {
-      m <- df_bl |> model(fun(y ~ trend()))
+      m <- df |> model(fun(y ~ trend()))
     }
   } else {
     if (!n && s > 1) {
-      m <- df_bl |> model(fun(y ~ season()))
+      m <- df |> model(fun(y ~ season()))
     } else {
-      m <- df_bl |> model(fun(y))
+      m <- df |> model(fun(y))
     }
   }
 
   fc <- m |> forecast(h = h)
-  bl <- m |> forecast(new_data = df_bl)
+  bl <- m |> forecast(new_data = df)
 
   result <- fabletools::hilo(fc, 95) |>
     unpack_hilo(cols = `95%`) |>
@@ -219,7 +220,7 @@ app$on("request", function(server, request, ...) {
   if (request$path == "/") {
     s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
     n <- as.logical(request$query$n) # Naive
-    res <- handleForecast(y, h, t, n, s)
+    res <- handleForecast(y, h, s, t, n)
   } else if (request$path == "/cum") {
     res <- handleCumulativeForecast(y, h, t)
   } else {
