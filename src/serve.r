@@ -189,7 +189,7 @@ cumForecastN <- function(df_train, df_test, t) {
   n <- ncol(lengths(oo$var.fit))
   res <- agg_pred(rep.int(x = 1, length(oo$fit)), oo, alpha = .95)
   tibble(
-    actual = round(sum(df_test$y), 1),
+    # actual = round(sum(df_test$y), 1),
     y = round(fc_sum_mean, 1),
     lower = round(res$PI[1], 1),
     upper = round(res$PI[2], 1)
@@ -213,7 +213,7 @@ handleCumulativeForecast <- function(y, h, t) {
   }
 
   list(
-    actual = result$actual,
+    # actual = result$actual,
     y = result$y,
     lower = result$lower,
     upper = result$upper
