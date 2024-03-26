@@ -130,49 +130,51 @@ handleForecast <- function(y, h, m, s, t) {
   # s <- 1
   # t <- TRUE
 
-  df <- tibble(x = seq.int(1, length(y)), y = y)
+  df <- tibble(year = seq.int(1, length(y)), asmr = y)
   if (s == 2) {
-    df$x <- make_yearquarter(2000, 1) + 0:(length(y) - 1)
+    df$year <- make_yearquarter(2000, 1) + 0:(length(y) - 1)
   } else if (s == 3) {
-    df$x <- make_yearmonth(2000, 1) + 0:(length(y) - 1)
+    df$year <- make_yearmonth(2000, 1) + 0:(length(y) - 1)
   } else if (s == 4) {
-    df$x <- make_yearweek(2000, 1) + 0:(length(y) - 1)
+    df$year <- make_yearweek(2000, 1) + 0:(length(y) - 1)
   }
 
-  df <- df |> as_tsibble(index = x)
+  df <- df |> as_tsibble(index = year)
 
   if (m == "naive") {
-    mdl <- df |> model(NAIVE(y))
+    mdl <- df |> model(NAIVE(asmr))
   } else if (m == "mean") {
     if (s > 1) {
-      mdl <- df |> model(TSLM(y ~ season()))
+      mdl <- df |> model(TSLM(asmr ~ season()))
     } else {
-      mdl <- df |> model(TSLM(y))
+      mdl <- df |> model(TSLM(asmr))
     }
   } else if (m == "lin_reg") {
     if (t) {
       if (s > 1) {
-        mdl <- df |> model(TSLM(y ~ trend() + season()))
+        mdl <- df |> model(TSLM(asmr ~ trend() + season()))
       } else {
-        mdl <- df |> model(TSLM(y ~ trend()))
+        mdl <- df |> model(TSLM(asmr ~ trend()))
       }
     } else {
       if (s > 1) {
-        mdl <- df |> model(TSLM(y ~ season()))
+        mdl <- df |> model(TSLM(asmr ~ season()))
       } else {
-        mdl <- df |> model(TSLM(y))
+        mdl <- df |> model(TSLM(asmr))
       }
     }
   } else if (m == "exp") {
     if (s > 1) {
-      mdl <- df |> model(ETS(y ~ error("A") + trend("Ad") + season("N")))
+      mdl <- df |> model(ETS(asmr ~ error("A") + trend("Ad") + season("N")))
     } else {
-      mdl <- df |> model(ETS(y ~ error("A") + trend("Ad")))
+      mdl <- df |> model(ETS(asmr ~ error("A") + trend("Ad")))
     }
   }
 
   fc <- mdl |> forecast(h = h)
-  bl <- mdl |> forecast(new_data = df)
+  bl <- mdl |>
+    augment() |>
+    rename(.mean = .fitted)
 
   result <- fabletools::hilo(fc, 95) |>
     unpack_hilo(cols = `95%`) |>
