@@ -123,12 +123,12 @@ app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 app$header("Access-Control-Allow-Origin", "*")
 app$header("Cache-Control", "max-age=86400") # Cache 1d
 
-handleForecast <- function(y, h, s, t, n) {
-  # y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
-  # h <- 5
-  # s <- 1
-  # t <- TRUE
-  # n <- FALSE
+handleForecast <- function(y, h, s, t, n, e) {
+  y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
+  h <- 5
+  s <- 1
+  t <- TRUE
+  n <- FALSE
 
   df <- tibble(x = seq.int(1, length(y)), y = y)
   if (s == 2) {
@@ -139,7 +139,12 @@ handleForecast <- function(y, h, s, t, n) {
     df$x <- make_yearweek(2000, 1) + 0:(length(y) - 1)
   }
 
-  fun <- ifelse(n, NAIVE, TSLM)
+  fun <- TSLM
+  if (n) {
+    fun <- NAIVE
+  } else if (e) {
+    fun <- ETS
+  }
   df <- df |> as_tsibble(index = x)
   if (t) {
     if (!n && s > 1) {
@@ -228,7 +233,8 @@ app$on("request", function(server, request, ...) {
   if (request$path == "/") {
     s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
     n <- as.logical(request$query$n) # Naive
-    res <- handleForecast(y, h, s, t, n)
+    e <- as.logical(request$query$e)
+    res <- handleForecast(y, h, s, t, n, e)
   } else if (request$path == "/cum") {
     res <- handleCumulativeForecast(y, h, t)
   } else {
