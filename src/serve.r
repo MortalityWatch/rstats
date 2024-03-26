@@ -126,7 +126,7 @@ app$header("Cache-Control", "max-age=86400") # Cache 1d
 handleForecast <- function(y, h, m, s, t) {
   # y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
   # h <- 5
-  # m <- 2
+  # m <- "exp"
   # s <- 1
   # t <- TRUE
 
@@ -141,9 +141,15 @@ handleForecast <- function(y, h, m, s, t) {
 
   df <- df |> as_tsibble(index = x)
 
-  if (m == 1) { # NAIVE
+  if (m == "naive") {
     mdl <- df |> model(NAIVE(y))
-  } else if (m == 2) { # TSLM
+  } else if (m == "mean") {
+    if (s > 1) {
+      mdl <- df |> model(TSLM(y ~ season()))
+    } else {
+      mdl <- df |> model(TSLM(y))
+    }
+  } else if (m == "lin_reg") {
     if (t) {
       if (s > 1) {
         mdl <- df |> model(TSLM(y ~ trend() + season()))
@@ -157,7 +163,7 @@ handleForecast <- function(y, h, m, s, t) {
         mdl <- df |> model(TSLM(y))
       }
     }
-  } else if (m == 3) { # ETS
+  } else if (m == "exp") {
     if (s > 1) {
       mdl <- df |> model(ETS(y ~ error("A") + trend("Ad") + season("N")))
     } else {
@@ -168,7 +174,7 @@ handleForecast <- function(y, h, m, s, t) {
   fc <- mdl |> forecast(h = h)
   bl <- mdl |> forecast(new_data = df)
 
-  result <-fabletools::hilo(fc, 95) |>
+  result <- fabletools::hilo(fc, 95) |>
     unpack_hilo(cols = `95%`) |>
     as_tibble() |>
     select(.mean, "95%_lower", "95%_upper") |>
@@ -236,7 +242,7 @@ app$on("request", function(server, request, ...) {
   t <- as.logical(request$query$t)
 
   if (request$path == "/") {
-    m <- as.integer(request$query$m) # Method: naive, tslm, exp
+    m <- request$query$m # Method
     s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
     res <- handleForecast(y, h, m, s, t)
   } else if (request$path == "/cum") {
