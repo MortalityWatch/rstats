@@ -139,7 +139,11 @@ handleForecast <- function(y, h, m, s, t) {
     df$year <- make_yearweek(2000, 1) + 0:(length(y) - 1)
   }
 
-  df <- df |> as_tsibble(index = year)
+  leading_NA <- nrow(df |> filter(is.na(asmr)))
+
+  df <- df |>
+    as_tsibble(index = year) |>
+    filter(!is.na(asmr))
 
   if (m == "naive") {
     mdl <- df |> model(NAIVE(asmr))
@@ -181,7 +185,10 @@ handleForecast <- function(y, h, m, s, t) {
     as_tibble() |>
     select(.mean, "95%_lower", "95%_upper") |>
     setNames(c("y", "lower", "upper"))
-  result <- bind_rows(tibble(y = bl$.mean), result) |>
+  result <- bind_rows(
+    tibble(y = rep(NA, leading_NA)),
+    tibble(y = bl$.mean), result
+  ) |>
     mutate_if(is.numeric, round, 1)
 
   list(y = result$y, lower = result$lower, upper = result$upper)
