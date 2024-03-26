@@ -123,12 +123,12 @@ app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 app$header("Access-Control-Allow-Origin", "*")
 app$header("Cache-Control", "max-age=86400") # Cache 1d
 
-handleForecast <- function(y, h, s, t, n, e) {
-  y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
-  h <- 5
-  s <- 1
-  t <- TRUE
-  n <- FALSE
+handleForecast <- function(y, h, m, s, t) {
+  # y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
+  # h <- 5
+  # m <- 2
+  # s <- 1
+  # t <- TRUE
 
   df <- tibble(x = seq.int(1, length(y)), y = y)
   if (s == 2) {
@@ -139,31 +139,36 @@ handleForecast <- function(y, h, s, t, n, e) {
     df$x <- make_yearweek(2000, 1) + 0:(length(y) - 1)
   }
 
-  fun <- TSLM
-  if (n) {
-    fun <- NAIVE
-  } else if (e) {
-    fun <- ETS
-  }
   df <- df |> as_tsibble(index = x)
-  if (t) {
-    if (!n && s > 1) {
-      m <- df |> model(fun(y ~ trend() + season()))
+
+  if (m == 1) { # NAIVE
+    mdl <- df |> model(NAIVE(y))
+  } else if (m == 2) { # TSLM
+    if (t) {
+      if (s > 1) {
+        mdl <- df |> model(TSLM(y ~ trend() + season()))
+      } else {
+        mdl <- df |> model(TSLM(y ~ trend()))
+      }
     } else {
-      m <- df |> model(fun(y ~ trend()))
+      if (s > 1) {
+        mdl <- df |> model(TSLM(y ~ season()))
+      } else {
+        mdl <- df |> model(TSLM(y))
+      }
     }
-  } else {
-    if (!n && s > 1) {
-      m <- df |> model(fun(y ~ season()))
+  } else if (m == 3) { # ETS
+    if (s > 1) {
+      mdl <- df |> model(ETS(y ~ error("A") + trend("Ad") + season("N")))
     } else {
-      m <- df |> model(fun(y))
+      mdl <- df |> model(ETS(y ~ error("A") + trend("Ad")))
     }
   }
 
-  fc <- m |> forecast(h = h)
-  bl <- m |> forecast(new_data = df)
+  fc <- mdl |> forecast(h = h)
+  bl <- mdl |> forecast(new_data = df)
 
-  result <- fabletools::hilo(fc, 95) |>
+  result <-fabletools::hilo(fc, 95) |>
     unpack_hilo(cols = `95%`) |>
     as_tibble() |>
     select(.mean, "95%_lower", "95%_upper") |>
@@ -231,10 +236,9 @@ app$on("request", function(server, request, ...) {
   t <- as.logical(request$query$t)
 
   if (request$path == "/") {
+    m <- as.integer(request$query$m) # Method: naive, tslm, exp
     s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
-    n <- as.logical(request$query$n) # Naive
-    e <- as.logical(request$query$e)
-    res <- handleForecast(y, h, s, t, n, e)
+    res <- handleForecast(y, h, m, s, t)
   } else if (request$path == "/cum") {
     res <- handleCumulativeForecast(y, h, t)
   } else {
