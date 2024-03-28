@@ -170,7 +170,7 @@ handleForecast <- function(y, h, m, s, t) {
     }
   } else if (m == "exp") {
     if (s > 1) {
-      mdl <- df |> model(ETS(asmr ~ error("A") + trend("Ad") + season("N")))
+      mdl <- df |> model(ETS(asmr ~ error() + trend() + season()))
     } else {
       mdl <- df |> model(ETS(asmr ~ error("A") + trend("Ad")))
     }
@@ -180,6 +180,8 @@ handleForecast <- function(y, h, m, s, t) {
   bl <- mdl |>
     augment() |>
     rename(.mean = .fitted)
+
+  fc |> autoplot()
 
   result <- fabletools::hilo(fc, 95) |>
     unpack_hilo(cols = `95%`) |>
