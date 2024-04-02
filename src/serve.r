@@ -60,7 +60,7 @@ lm_predict_tslm <- function(model, newdata, diag = TRUE) {
   sig2 <- c(crossprod(res)) / df_residual
 
   # 2) Variance-Covariance
-  model_formula <- y ~ x
+  model_formula <- asmr ~ year
   Xp <- model.matrix(model_formula, newdata)
 
   tslm_model <- model$lm[[1]]
@@ -197,19 +197,8 @@ handleForecast <- function(y, h, m, s, t) {
   list(y = result$y, lower = result$lower, upper = result$upper)
 }
 
-cumForecastN <- function(df_train, df_test, t) {
-  # Model: Lin. regr.
-  # model <- lm(y ~ x, data = df_train)
-  if (t) {
-    m <- df_train |> model(lm = TSLM(y ~ trend()))
-  } else {
-    m <- df_train |> model(lm = TSLM(y))
-  }
-  # model <- df_train |> model(lm = TSLM(y ~ trend()))
-
-  # Forecast
-  # oo <- lm_predict(model, df_test, FALSE)
-  oo <- lm_predict_tslm(model = m, newdata = df_test, FALSE)
+cumForecastN <- function(df_train, df_test, mdl) {
+  oo <- lm_predict_tslm(model = mdl, newdata = df_test, FALSE)
 
   fc_sum_mean <- sum(oo$fit)
   fc_sum_variance <- sum(oo$var.fit)
@@ -217,11 +206,28 @@ cumForecastN <- function(df_train, df_test, t) {
   n <- ncol(lengths(oo$var.fit))
   res <- agg_pred(rep.int(x = 1, length(oo$fit)), oo, alpha = .95)
   tibble(
-    # actual = round(sum(df_test$y), 1),
-    y = round(fc_sum_mean, 1),
+    asmr = round(fc_sum_mean, 1),
     lower = round(res$PI[1], 1),
     upper = round(res$PI[2], 1)
   )
+}
+
+uncumulate <- function(cumulative_vector) {
+  # Check if the vector is empty
+  if (length(cumulative_vector) == 0) {
+    return(cumulative_vector)
+  }
+
+  # Initialize the uncumulated vector with the first element of the cumulative vector
+  uncumulated_vector <- numeric(length(cumulative_vector))
+  uncumulated_vector[1] <- cumulative_vector[1]
+
+  # Calculate the uncumulated values
+  for (i in 2:length(cumulative_vector)) {
+    uncumulated_vector[i] <- cumulative_vector[i] - cumulative_vector[i - 1]
+  }
+
+  return(uncumulated_vector)
 }
 
 handleCumulativeForecast <- function(y, h, t) {
@@ -232,19 +238,30 @@ handleCumulativeForecast <- function(y, h, t) {
 
   z <- length(y) - h
 
-  df <- tibble(x = seq.int(1, length(y)), y = y) |> as_tsibble(index = x)
-  df_train <- df |> filter(x <= z)
+  df <- tibble(year = seq.int(1, length(y)), asmr = y) |>
+    as_tsibble(index = year)
+  df_train <- df |> filter(year <= z)
+
+  if (t) {
+    mdl <- df_train |> model(lm = TSLM(asmr ~ trend()))
+  } else {
+    mdl <- df_train |> model(lm = TSLM(asmr))
+  }
+
+  bl <- mdl |>
+    augment() |>
+    rename(.mean = .fitted)
+
   result <- tibble()
   for (h_ in 1:h) {
-    df_test <- df |> filter(x %in% (z + 1):(z + h_))
-    result <- rbind(result, cumForecastN(df_train, df_test, t))
+    df_test <- df |> filter(year %in% (z + 1):(z + h_))
+    result <- rbind(result, cumForecastN(df_train, df_test, mdl))
   }
 
   list(
-    # actual = result$actual,
-    y = result$y,
-    lower = result$lower,
-    upper = result$upper
+    y = c(bl$.mean, uncumulate(result$asmr)),
+    lower = c(rep(NA, nrow(bl)), uncumulate(result$lower)),
+    upper = c(rep(NA, nrow(bl)), uncumulate(result$upper))
   )
 }
 
