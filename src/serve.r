@@ -121,8 +121,6 @@ agg_pred <- function(w, predObject, alpha = 0.95) {
 
 port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "3000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
-app$header("Access-Control-Allow-Origin", "*")
-app$header("Cache-Control", "max-age=86400") # Cache 1d
 
 handleForecast <- function(y, h, m, s, t) {
   # y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
