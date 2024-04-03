@@ -3,7 +3,6 @@ library(fable)
 library(tidyverse)
 library(fiery)
 library(tsibble)
-library(memoise)
 
 # https://stackoverflow.com/a/39338512/2302437
 lm_predict <- function(lmObject, newdata, diag = TRUE) {
@@ -262,10 +261,6 @@ handleCumulativeForecast <- function(y, h, t) {
     upper = c(rep(NA, nrow(bl)), uncumulate(result$upper))
   )
 }
-
-# Cache functions
-handleForecast <- memoise(handleForecast)
-handleCumulativeForecast <- memoise(handleCumulativeForecast)
 
 app$on("request", function(server, request, ...) {
   y <- as.double(strsplit(request$query$y, ",")[[1]])
