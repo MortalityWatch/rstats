@@ -178,8 +178,6 @@ handleForecast <- function(y, h, m, s, t) {
     augment() |>
     rename(.mean = .fitted)
 
-  fc |> autoplot()
-
   result <- fabletools::hilo(fc, 95) |>
     unpack_hilo(cols = `95%`) |>
     as_tibble() |>
