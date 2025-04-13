@@ -261,6 +261,8 @@ handleCumulativeForecast <- function(y, h, t) {
 }
 
 app$on("request", function(server, request, ...) {
+  print(sprintf("Processing request: %s", paste(request$query, collapse = ", ")))
+  
   y <- as.double(strsplit(request$query$y, ",")[[1]])
   h <- as.integer(request$query$h)
   t <- as.logical(request$query$t)
