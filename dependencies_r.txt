@@ -2,3 +2,4 @@ tibble
 fable
 tidyverse
 fiery
+future.apply

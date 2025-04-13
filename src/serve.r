@@ -4,6 +4,8 @@ library(tidyverse)
 library(fiery)
 library(tsibble)
 
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
 # https://stackoverflow.com/a/39338512/2302437
 lm_predict <- function(lmObject, newdata, diag = TRUE) {
   # input checking
@@ -261,11 +263,28 @@ handleCumulativeForecast <- function(y, h, t) {
 }
 
 app$on("request", function(server, request, ...) {
-  print(sprintf("Processing request: %s", paste(request$query, collapse = ", ")))
+  print(sprintf(
+    "Processing request: %s",
+    paste(sprintf("%s=%s", names(request$query), unlist(request$query)), collapse = ", ")
+  ))
+
+  if (is.null(request$query$y)) {
+    server$status(400)
+    server$send("Missing 'y' parameter")
+    return()
+  }
   
-  y <- as.double(strsplit(request$query$y, ",")[[1]])
-  h <- as.integer(request$query$h)
-  t <- as.logical(request$query$t)
+  y <- tryCatch(
+    as.double(strsplit(as.character(request$query$y), ",")[[1]]),
+    error = function(e) {
+      server$status(400)
+      server$send("Invalid 'y' parameter format")
+      return()
+    }
+  )
+  
+  h <- as.integer(request$query$h %||% 1)
+  t <- as.logical(request$query$t %||% FALSE)
 
   if (request$path == "/") {
     m <- request$query$m # Method
@@ -277,6 +296,12 @@ app$on("request", function(server, request, ...) {
     # Handle other routes
     server$status(404)
     server$send("Route not found")
+  }
+
+  if (!exists("res")) {
+    server$status(400)
+    server$send("Invalid request")
+    return()
   }
 
   # Response
