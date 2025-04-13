@@ -120,7 +120,7 @@ agg_pred <- function(w, predObject, alpha = 0.95) {
   list(mean = agg_mean, var = agg_variance, CI = CI, PI = PI)
 }
 
-port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "3000")
+port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "5000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
 handleForecast <- function(y, h, m, s, t) {
