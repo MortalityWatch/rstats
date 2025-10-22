@@ -282,9 +282,9 @@ app$on("request", function(server, request, ...) {
       return()
     }
   )
-  
+
   h <- as.integer(request$query$h %||% 1)
-  t <- as.logical(request$query$t %||% FALSE)
+  t <- as.integer(request$query$t %||% 0) == 1
 
   if (request$path == "/") {
     m <- request$query$m # Method
