@@ -16,6 +16,12 @@ source("handlers.r")
 port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "5000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
+# CORS configuration
+ALLOWED_ORIGINS <- strsplit(
+  Sys.getenv("ALLOWED_ORIGINS", "https://www.mortality.watch,https://mortality.watch"),
+  ","
+)[[1]]
+
 # Rate limiting state
 rate_limit_store <- new.env()
 RATE_LIMIT_WINDOW <- 60 # seconds
@@ -172,20 +178,61 @@ validate_request <- function(query, path) {
   return(list(valid = TRUE))
 }
 
+#' Check if origin is allowed
+#'
+#' @param origin Origin header from request
+#' @return TRUE if allowed, FALSE otherwise
+is_origin_allowed <- function(origin) {
+  if (is.null(origin) || origin == "") {
+    # Allow requests with no origin (e.g., curl, same-origin)
+    return(TRUE)
+  }
+
+  origin %in% ALLOWED_ORIGINS
+}
+
+#' Set CORS headers on response if origin is allowed
+#'
+#' @param response Response object
+#' @param origin Origin header from request
+set_cors_headers <- function(response, origin) {
+  if (is.null(origin) || origin == "") {
+    return()
+  }
+
+  if (is_origin_allowed(origin)) {
+    response$headers$set("Access-Control-Allow-Origin", origin)
+    response$headers$set("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response$headers$set("Access-Control-Allow-Headers", "Content-Type")
+    response$headers$set("Access-Control-Max-Age", "3600")
+  }
+}
+
 #' Send error response
 #'
 #' @param server Fiery server object
+#' @param request Request object (for CORS)
 #' @param status HTTP status code
 #' @param message Error message
-send_error <- function(server, status, message) {
-  server$status(status)
-  server$type("json")
-  server$send(jsonlite::toJSON(list(error = message, status = status), auto_unbox = TRUE))
+send_error <- function(server, request, status, message) {
+  response <- request$respond()
+  response$body <- jsonlite::toJSON(list(error = message, status = status), auto_unbox = TRUE)
+  response$status <- status
+  response$type <- "json"
+
+  # Set CORS headers
+  origin <- request$headers$get("Origin")
+  set_cors_headers(response, origin)
+
+  return(response)
 }
 
 # Main request handler
 app$on("request", function(server, request, ...) {
   start_time <- Sys.time()
+
+  # Extract origin for CORS
+  origin <- request$headers$get("Origin")
 
   # Extract client IP (consider X-Forwarded-For for proxied requests)
   client_ip <- request$REMOTE_ADDR %||% "unknown"
@@ -193,13 +240,35 @@ app$on("request", function(server, request, ...) {
   # Log incoming request
   log_message("INFO", "Incoming request", list(
     path = request$path,
+    method = request$method,
     ip = client_ip,
+    origin = origin %||% "none",
     params = paste(sprintf("%s=%s", names(request$query),
                           sapply(request$query, function(x) {
                             s <- as.character(x)
                             if (nchar(s) > 50) paste0(substr(s, 1, 47), "...") else s
                           })), collapse = ", ")
   ))
+
+  # CORS preflight (OPTIONS) request
+  if (request$method == "OPTIONS") {
+    if (!is_origin_allowed(origin)) {
+      log_message("WARN", "CORS rejected", list(ip = client_ip, origin = origin))
+      return(send_error(server, request, 403, "Origin not allowed"))
+    }
+
+    response <- request$respond()
+    response$status <- 204L  # No Content
+    set_cors_headers(response, origin)
+    log_message("INFO", "CORS preflight", list(origin = origin))
+    return(response)
+  }
+
+  # Check origin for non-OPTIONS requests
+  if (!is_origin_allowed(origin)) {
+    log_message("WARN", "CORS rejected", list(ip = client_ip, origin = origin))
+    return(send_error(server, request, 403, "Origin not allowed"))
+  }
 
   # Health check endpoint
   if (request$path == "/health") {
@@ -211,6 +280,7 @@ app$on("request", function(server, request, ...) {
     ), auto_unbox = TRUE)
     response$status <- 200L
     response$type <- "json"
+    set_cors_headers(response, origin)
 
     log_message("INFO", "Health check", list(status = "ok"))
     return(response)
@@ -219,8 +289,7 @@ app$on("request", function(server, request, ...) {
   # Rate limiting
   if (!check_rate_limit(client_ip)) {
     log_message("WARN", "Rate limit exceeded", list(ip = client_ip))
-    send_error(server, 429, "Rate limit exceeded. Maximum 100 requests per minute.")
-    return()
+    return(send_error(server, request, 429, "Rate limit exceeded. Maximum 100 requests per minute."))
   }
 
   # Validate request
@@ -230,8 +299,7 @@ app$on("request", function(server, request, ...) {
       ip = client_ip,
       error = validation$message
     ))
-    send_error(server, validation$status, validation$message)
-    return()
+    return(send_error(server, request, validation$status, validation$message))
   }
 
   # Check cache for non-health endpoints
@@ -249,6 +317,7 @@ app$on("request", function(server, request, ...) {
     response$status <- 200L
     response$type <- "json"
     response$headers$set("X-Cache", "HIT")
+    set_cors_headers(response, origin)
     return(response)
   }
 
@@ -267,8 +336,7 @@ app$on("request", function(server, request, ...) {
       handleCumulativeForecast(y, h, t)
     } else {
       log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
-      send_error(server, 404, "Route not found. Available routes: /, /cum, /health")
-      return()
+      return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
     }
   }, error = function(e) {
     log_message("ERROR", "Processing failed", list(
@@ -276,13 +344,12 @@ app$on("request", function(server, request, ...) {
       path = request$path,
       error = as.character(e)
     ))
-    send_error(server, 500, paste("Internal server error:", as.character(e)))
-    return(NULL)
+    return(send_error(server, request, 500, paste("Internal server error:", as.character(e))))
   })
 
-  # Check if error occurred
-  if (is.null(res)) {
-    return()
+  # Check if error occurred (send_error returns a response object, not NULL)
+  if (inherits(res, "response")) {
+    return(res)
   }
 
   # Store result in cache
@@ -294,6 +361,7 @@ app$on("request", function(server, request, ...) {
   response$status <- 200L
   response$type <- "json"
   response$headers$set("X-Cache", "MISS")
+  set_cors_headers(response, origin)
 
   # Log completion
   duration_ms <- round(as.numeric(difftime(Sys.time(), start_time, units = "secs")) * 1000, 2)

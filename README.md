@@ -55,6 +55,7 @@ docker run -p 5000:5000 rstats-service
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `5000` | HTTP server port |
+| `ALLOWED_ORIGINS` | `https://www.mortality.watch,https://mortality.watch` | Comma-separated list of allowed CORS origins |
 
 ## API Documentation
 
@@ -184,6 +185,41 @@ RATE_LIMIT_WINDOW <- 60         # seconds
 RATE_LIMIT_MAX_REQUESTS <- 100  # requests
 ```
 
+## Security Features
+
+### CORS (Cross-Origin Resource Sharing)
+
+The service implements strict CORS policies to only allow requests from whitelisted origins.
+
+**Default allowed origins:**
+- `https://www.mortality.watch`
+- `https://mortality.watch`
+
+**How it works:**
+- Requests from non-whitelisted origins receive HTTP 403
+- Preflight OPTIONS requests are handled correctly
+- CORS headers are only set for allowed origins
+- Requests without an Origin header (e.g., curl, Postman) are allowed
+
+**Custom configuration:**
+```bash
+# Allow additional origins
+export ALLOWED_ORIGINS="https://www.mortality.watch,https://mortality.watch,https://dev.mortality.watch"
+```
+
+**CORS rejection response:**
+```json
+{
+  "error": "Origin not allowed",
+  "status": 403
+}
+```
+
+**Logs:**
+```
+[2025-10-26 12:35:15] WARN: CORS rejected - ip=192.168.1.3, origin=https://evil.com
+```
+
 ## Project Structure
 
 ```
@@ -235,6 +271,11 @@ dokku nginx-cors:enable rstats-mortality-watch
 # Enable caching
 dokku nginx-cache:enable rstats-mortality-watch
 ```
+
+**Port Configuration:**
+- The service runs on port 5000 internally (configurable via `PORT` env var)
+- Dokku automatically proxies external port 80 to internal port 5000
+- No explicit port mapping needed in `deployments/config.json`
 
 Pre-deployment script: `pre-deploy.sh`
 
@@ -309,7 +350,9 @@ Special handling for cumulative annual data with proper uncertainty intervals.
 
 ## License
 
-[Your license here]
+AGPL-3.0 - see [LICENSE](LICENSE) file for details.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
 ## Support
 
