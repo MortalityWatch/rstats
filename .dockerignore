@@ -1,0 +1,22 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+README.md
+*.md
+
+# IDE
+.vscode
+.idea
+.DS_Store
+
+# History
+.history
+
+# Tests (not needed in production)
+tests/
+
+# Scripts
+pre-deploy.sh

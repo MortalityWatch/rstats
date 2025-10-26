@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.2'
+          use-public-rspm: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl bash vim
+
+      - name: Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-${{ hashFiles('dependencies_r.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-r-
+
+      - name: Install R dependencies
+        run: |
+          # Install tidyverse dependencies individually to avoid memory issues
+          install.packages(c(
+            "tibble",
+            "dplyr",
+            "tidyr",
+            "purrr",
+            "ggplot2",
+            "fable",
+            "fiery",
+            "tsibble",
+            "testthat"
+          ), repos = "https://cloud.r-project.org/", Ncpus = 2)
+        shell: Rscript {0}
+
+      - name: Run unit tests
+        run: |
+          cd tests
+          # Run only utils tests to avoid loading heavy serve.r dependencies
+          Rscript -e "library(testthat); test_file('test_utils.r', reporter = 'progress')"
+        continue-on-error: false
+
+      - name: Check code syntax
+        run: |
+          Rscript -e "parse('src/utils.r')"
+          Rscript -e "parse('src/handlers.r')"
+          Rscript -e "parse('src/serve.r')"
+        continue-on-error: false
+
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true  # Load image into Docker daemon for testing
+          tags: rstats-service:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image runs
+        run: |
+          docker run -d --name rstats-test -p 5000:5000 rstats-service:test
+
+          echo "Waiting for R server to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:5000/health > /dev/null 2>&1; then
+              echo "Server is up after ${i} seconds!"
+              break
+            fi
+            echo "Attempt $i/30: Server not ready yet..."
+            sleep 2
+          done
+
+          echo "=== Docker container status ==="
+          docker ps -a | grep rstats-test
+
+          echo "=== Server logs ==="
+          docker logs rstats-test
+
+          echo "=== Testing health endpoint ==="
+          curl -v http://localhost:5000/health || exit 1
+
+          echo "=== Testing forecast endpoint ==="
+          curl -v "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=mean&t=0" || exit 1
+
+          docker stop rstats-test
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.2'
+          use-public-rspm: true
+
+      - name: Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-lint-4.3.2
+          restore-keys: |
+            ${{ runner.os }}-r-lint-
+
+      - name: Install lintr
+        run: install.packages("lintr", repos = "https://cloud.r-project.org/")
+        shell: Rscript {0}
+
+      - name: Lint R code
+        run: |
+          library(lintr)
+          lint_dir("src", linters = linters_with_defaults(
+            line_length_linter(120),
+            object_name_linter = NULL,
+            commented_code_linter = NULL
+          ))
+        shell: Rscript {0}
+        continue-on-error: true

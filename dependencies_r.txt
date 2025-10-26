@@ -3,3 +3,5 @@ fable
 tidyverse
 fiery
 future.apply
+tsibble
+testthat

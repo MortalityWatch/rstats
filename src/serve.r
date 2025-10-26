@@ -1,318 +1,383 @@
+# Main Server
+# HTTP server for statistical forecasting API
+
+# Load required libraries
 library(tibble)
 library(fable)
 library(tidyverse)
 library(fiery)
 library(tsibble)
 
-`%||%` <- function(a, b) if (!is.null(a)) a else b
+# Load utility functions and handlers
+source("utils.r")
+source("handlers.r")
 
-# https://stackoverflow.com/a/39338512/2302437
-lm_predict <- function(lmObject, newdata, diag = TRUE) {
-  # input checking
-  if (!inherits(lmObject, "lm")) stop("'lmObject' is not a valid 'lm' object!")
-  # extract "terms" object from the fitted model, but delete response variable
-  tm <- delete.response(terms(lmObject))
-  # linear predictor matrix
-  Xp <- model.matrix(tm, newdata)
-  # predicted values by direct matrix-vector multiplication
-  pred <- c(Xp %*% coef(lmObject))
-
-  # efficiently form the complete variance-covariance matrix
-  QR <- lmObject$qr # qr object of fitted model
-  piv <- QR$pivot # pivoting index
-  r <- QR$rank # model rank / numeric rank
-  if (is.unsorted(piv)) {
-    # pivoting has been done
-    B <- forwardsolve(t(QR$qr), t(Xp[, piv]), r)
-  } else {
-    # no pivoting is done
-    B <- forwardsolve(t(QR$qr), t(Xp), r)
-  }
-  # residual variance
-  sig2 <- c(crossprod(residuals(lmObject))) / df.residual(lmObject)
-  if (diag) {
-    # return point-wise prediction variance
-    VCOV <- colSums(B^2) * sig2
-  } else {
-    # return full variance-covariance matrix of predicted values
-    VCOV <- crossprod(B) * sig2
-  }
-  list(
-    fit = pred,
-    var.fit = VCOV,
-    df = lmObject$df.residual,
-    residual.var = sig2
-  )
-}
-
-# Adapted lm_predict to work with fable tslm models.
-lm_predict_tslm <- function(model, newdata, diag = TRUE) {
-  # 1) Fit
-  fc <- model |> forecast(h = nrow(newdata))
-
-  # 3) Residual
-  res <- residuals(model)$.resid
-  res[is.na(res)] <- 0
-  n <- length(res) # number of observations
-  p <- nrow(coef(model)) # number of parameters
-  df_residual <- n - p
-
-  # 4) Sigma2
-  sig2 <- c(crossprod(res)) / df_residual
-
-  # 2) Variance-Covariance
-  model_formula <- asmr ~ year
-  Xp <- model.matrix(model_formula, newdata)
-
-  tslm_model <- model$lm[[1]]
-  QR <- tslm_model$fit$qr # qr object of fitted model
-  piv <- tslm_model$fit$qr$pivot # pivoting index
-  r <- tslm_model$fit$qr$rank # model rank / numeric rank
-  if (is.unsorted(piv)) {
-    # pivoting has been done
-    B <- forwardsolve(t(QR$qr), t(Xp[, piv]), r)
-  } else {
-    # no pivoting is done
-    B <- forwardsolve(t(QR$qr), t(Xp), r)
-  }
-
-  if (diag) {
-    # return point-wise prediction variance
-    VCOV <- colSums(B^2) * sig2
-  } else {
-    # return full variance-covariance matrix of predicted values
-    VCOV <- crossprod(B) * sig2
-  }
-
-  # Result
-  list(
-    fit = fc$.mean,
-    var.fit = VCOV,
-    df = df_residual,
-    residual.var = sig2
-  )
-}
-
-# https://stackoverflow.com/a/39338512/2302437
-agg_pred <- function(w, predObject, alpha = 0.95) {
-  # input checing
-  if (length(w) != length(predObject$fit)) stop("'w' has wrong length!")
-  if (!is.matrix(predObject$var.fit)) {
-    stop("'predObject' has no variance-covariance matrix!")
-  }
-  # mean of the aggregation
-  agg_mean <- c(crossprod(predObject$fit, w))
-  # variance of the aggregation
-  agg_variance <- c(crossprod(w, predObject$var.fit %*% w))
-  # adjusted variance-covariance matrix
-  VCOV_adj <- with(predObject, var.fit + diag(residual.var, nrow(var.fit)))
-  # adjusted variance of the aggregation
-  agg_variance_adj <- c(crossprod(w, VCOV_adj %*% w))
-  # t-distribution quantiles
-  Qt <- c(-1, 1) * qt((1 - alpha) / 2, predObject$df, lower.tail = FALSE)
-  # names of CI and PI
-  NAME <- c("lower", "upper")
-  # CI
-  CI <- setNames(agg_mean + Qt * sqrt(agg_variance), NAME)
-  # PI
-  PI <- setNames(agg_mean + Qt * sqrt(agg_variance_adj), NAME)
-  # return
-  list(mean = agg_mean, var = agg_variance, CI = CI, PI = PI)
-}
-
+# Server configuration
 port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "5000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
-handleForecast <- function(y, h, m, s, t) {
-  # y <- c(756.7, 733.9, 696.9, 713.7, 707.7, 678.3, 708.5, 681.8, 684)
-  # h <- 5
-  # m <- "exp"
-  # s <- 1
-  # t <- TRUE
+# CORS configuration
+ALLOWED_ORIGINS <- strsplit(
+  Sys.getenv("ALLOWED_ORIGINS", "https://www.mortality.watch,https://mortality.watch,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000"),
+  ","
+)[[1]]
 
-  df <- tibble(year = seq.int(1, length(y)), asmr = y)
-  if (s == 2) {
-    df$year <- make_yearquarter(2000, 1) + 0:(length(y) - 1)
-  } else if (s == 3) {
-    df$year <- make_yearmonth(2000, 1) + 0:(length(y) - 1)
-  } else if (s == 4) {
-    df$year <- make_yearweek(2000, 1) + 0:(length(y) - 1)
-  }
+# Rate limiting state
+rate_limit_store <- new.env()
+RATE_LIMIT_WINDOW <- 60 # seconds
+RATE_LIMIT_MAX_REQUESTS <- 100 # max requests per window
 
-  leading_NA <- nrow(df |> filter(is.na(asmr)))
+# Response cache
+cache_store <- new.env()
+CACHE_TTL <- 3600 # 1 hour in seconds
 
-  df <- df |>
-    as_tsibble(index = year) |>
-    filter(!is.na(asmr))
-
-  if (m == "naive") {
-    mdl <- df |> model(NAIVE(asmr))
-  } else if (m == "mean") {
-    if (s > 1) {
-      mdl <- df |> model(TSLM(asmr ~ season()))
-    } else {
-      mdl <- df |> model(TSLM(asmr))
-    }
-  } else if (m == "lin_reg") {
-    if (t) {
-      if (s > 1) {
-        mdl <- df |> model(TSLM(asmr ~ trend() + season()))
-      } else {
-        mdl <- df |> model(TSLM(asmr ~ trend()))
-      }
-    } else {
-      if (s > 1) {
-        mdl <- df |> model(TSLM(asmr ~ season()))
-      } else {
-        mdl <- df |> model(TSLM(asmr))
-      }
-    }
-  } else if (m == "exp") {
-    if (s > 1) {
-      mdl <- df |> model(ETS(asmr ~ error() + trend() + season()))
-    } else {
-      mdl <- df |> model(ETS(asmr ~ error("A") + trend("Ad")))
-    }
-  }
-
-  fc <- mdl |> forecast(h = h)
-  bl <- mdl |>
-    augment() |>
-    rename(.mean = .fitted)
-
-  result <- fabletools::hilo(fc, 95) |>
-    unpack_hilo(cols = `95%`) |>
-    as_tibble() |>
-    select(.mean, "95%_lower", "95%_upper") |>
-    setNames(c("y", "lower", "upper"))
-  result <- bind_rows(
-    tibble(y = rep(NA, leading_NA)),
-    tibble(y = bl$.mean), result
-  ) |>
-    mutate_if(is.numeric, round, 1)
-
-  list(y = result$y, lower = result$lower, upper = result$upper)
+#' Generate cache key from request parameters
+#'
+#' @param path Request path
+#' @param query Query parameters
+#' @return String cache key
+generate_cache_key <- function(path, query) {
+  # Sort query parameters for consistent keys
+  sorted_params <- query[order(names(query))]
+  param_str <- paste(sprintf("%s=%s", names(sorted_params), unlist(sorted_params)), collapse = "&")
+  paste0(path, "?", param_str)
 }
 
-cumForecastN <- function(df_train, df_test, mdl) {
-  oo <- lm_predict_tslm(model = mdl, newdata = df_test, FALSE)
+#' Get cached response if valid
+#'
+#' @param cache_key Cache key string
+#' @return Cached response or NULL if not found/expired
+get_cached_response <- function(cache_key) {
+  if (!exists(cache_key, envir = cache_store)) {
+    return(NULL)
+  }
 
-  fc_sum_mean <- sum(oo$fit)
-  fc_sum_variance <- sum(oo$var.fit)
+  cache_entry <- cache_store[[cache_key]]
+  current_time <- as.numeric(Sys.time())
 
-  n <- ncol(lengths(oo$var.fit))
-  res <- agg_pred(rep.int(x = 1, length(oo$fit)), oo, alpha = .95)
-  tibble(
-    asmr = round(fc_sum_mean, 1),
-    lower = round(res$PI[1], 1),
-    upper = round(res$PI[2], 1)
+  if (current_time - cache_entry$timestamp > CACHE_TTL) {
+    # Cache expired
+    rm(list = cache_key, envir = cache_store)
+    return(NULL)
+  }
+
+  return(cache_entry$response)
+}
+
+#' Store response in cache
+#'
+#' @param cache_key Cache key string
+#' @param response Response object to cache
+set_cached_response <- function(cache_key, response) {
+  cache_store[[cache_key]] <- list(
+    response = response,
+    timestamp = as.numeric(Sys.time())
   )
 }
 
-uncumulate <- function(cumulative_vector) {
-  # Check if the vector is empty
-  if (length(cumulative_vector) == 0) {
-    return(cumulative_vector)
+#' Check rate limit for IP address
+#'
+#' @param ip IP address string
+#' @return TRUE if under limit, FALSE if over limit
+check_rate_limit <- function(ip) {
+  current_time <- as.numeric(Sys.time())
+
+  if (!exists(ip, envir = rate_limit_store)) {
+    rate_limit_store[[ip]] <- list(count = 1, window_start = current_time)
+    return(TRUE)
   }
 
-  # Initialize the uncumulated vector with the first element of the cumulative vector
-  uncumulated_vector <- numeric(length(cumulative_vector))
-  uncumulated_vector[1] <- cumulative_vector[1]
+  ip_data <- rate_limit_store[[ip]]
+  time_elapsed <- current_time - ip_data$window_start
 
-  # Calculate the uncumulated values
-  for (i in 2:length(cumulative_vector)) {
-    uncumulated_vector[i] <- cumulative_vector[i] - cumulative_vector[i - 1]
+  if (time_elapsed > RATE_LIMIT_WINDOW) {
+    # Reset window
+    rate_limit_store[[ip]] <- list(count = 1, window_start = current_time)
+    return(TRUE)
   }
 
-  return(uncumulated_vector)
+  if (ip_data$count >= RATE_LIMIT_MAX_REQUESTS) {
+    return(FALSE)
+  }
+
+  # Increment counter
+  rate_limit_store[[ip]]$count <- ip_data$count + 1
+  return(TRUE)
 }
 
-handleCumulativeForecast <- function(y, h, t) {
-  # USA
-  # y <- c(878.6, 866.4, 864.9, 1017.8, 1029.5, 961.5, 896.2)
-  # h <- 4
-  # t <- FALSE
+#' Log request with structured format
+#'
+#' @param level Log level: INFO, WARN, ERROR
+#' @param message Log message
+#' @param details Optional list of additional details
+log_message <- function(level, message, details = NULL) {
+  timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  log_entry <- sprintf("[%s] %s: %s", timestamp, level, message)
 
-  z <- length(y) - h
-
-  df <- tibble(year = seq.int(1, length(y)), asmr = y) |>
-    as_tsibble(index = year)
-  df_train <- df |> filter(year <= z)
-
-  if (t) {
-    mdl <- df_train |> model(lm = TSLM(asmr ~ trend()))
-  } else {
-    mdl <- df_train |> model(lm = TSLM(asmr))
+  if (!is.null(details)) {
+    detail_str <- paste(sprintf("%s=%s", names(details), unlist(details)), collapse = ", ")
+    log_entry <- paste(log_entry, "-", detail_str)
   }
 
-  bl <- mdl |>
-    augment() |>
-    rename(.mean = .fitted)
+  print(log_entry)
+}
 
-  result <- tibble()
-  for (h_ in 1:h) {
-    df_test <- df |> filter(year %in% (z + 1):(z + h_))
-    result <- rbind(result, cumForecastN(df_train, df_test, mdl))
+#' Validate request parameters
+#'
+#' @param query Query parameters from request
+#' @param path Request path
+#' @return List with valid=TRUE/FALSE and error message if invalid
+validate_request <- function(query, path) {
+  # Check for required 'y' parameter
+  if (is.null(query$y)) {
+    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'y'"))
   }
 
-  list(
-    y = c(bl$.mean, uncumulate(result$asmr)),
-    lower = c(rep(NA, nrow(bl)), uncumulate(result$lower)),
-    upper = c(rep(NA, nrow(bl)), uncumulate(result$upper))
+  # Validate 'y' can be parsed as numeric
+  y <- tryCatch(
+    as.double(strsplit(as.character(query$y), ",")[[1]]),
+    error = function(e) NULL
   )
+
+  if (is.null(y)) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'y' must be comma-separated numeric values"))
+  }
+
+  # Check minimum data points
+  valid_y <- y[!is.na(y)]
+  if (length(valid_y) < 3) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'y' must contain at least 3 valid data points"))
+  }
+
+  # Check maximum array size (prevent DOS)
+  if (length(y) > 10000) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'y' exceeds maximum length of 10000"))
+  }
+
+  # Validate 'h' (horizon)
+  h <- as.integer(query$h %||% 1)
+  if (is.na(h) || h < 1 || h > 1000) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'h' must be a positive integer between 1 and 1000"))
+  }
+
+  # Path-specific validation
+  if (path == "/") {
+    # Validate 's' (seasonality)
+    s <- as.integer(query$s)
+    if (is.na(s) || !s %in% c(1, 2, 3, 4)) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 's' must be 1 (year), 2 (quarter), 3 (month), or 4 (week)"))
+    }
+
+    # Validate 'm' (method)
+    m <- query$m
+    if (is.null(m) || !m %in% c("naive", "mean", "lin_reg", "exp")) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'm' must be one of: naive, mean, lin_reg, exp"))
+    }
+  }
+
+  return(list(valid = TRUE))
 }
 
-app$on("request", function(server, request, ...) {
-  print(sprintf(
-    "Processing request: %s",
-    paste(sprintf("%s=%s", names(request$query), unlist(request$query)), collapse = ", ")
-  ))
+#' Check if origin is allowed
+#'
+#' @param origin Origin header from request
+#' @return TRUE if allowed, FALSE otherwise
+is_origin_allowed <- function(origin) {
+  if (is.null(origin) || origin == "") {
+    # Allow requests with no origin (e.g., curl, same-origin)
+    return(TRUE)
+  }
 
-  if (is.null(request$query$y)) {
-    server$status(400)
-    server$send("Missing 'y' parameter")
+  origin %in% ALLOWED_ORIGINS
+}
+
+#' Set CORS headers on response if origin is allowed
+#'
+#' @param response Response object
+#' @param origin Origin header from request
+set_cors_headers <- function(response, origin) {
+  if (is.null(origin) || origin == "") {
     return()
   }
-  
-  y <- tryCatch(
-    as.double(strsplit(as.character(request$query$y), ",")[[1]]),
-    error = function(e) {
-      server$status(400)
-      server$send("Invalid 'y' parameter format")
-      return()
-    }
-  )
 
+  if (is_origin_allowed(origin)) {
+    response$set_header("Access-Control-Allow-Origin", origin)
+    response$set_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response$set_header("Access-Control-Allow-Headers", "Content-Type")
+    response$set_header("Access-Control-Max-Age", "3600")
+  }
+}
+
+#' Send error response
+#'
+#' @param server Fiery server object
+#' @param request Request object (for CORS)
+#' @param status HTTP status code
+#' @param message Error message
+send_error <- function(server, request, status, message) {
+  response <- request$respond()
+  response$body <- jsonlite::toJSON(list(error = message, status = status), auto_unbox = TRUE)
+  response$status <- status
+  response$type <- "json"
+
+  # Set CORS headers
+  origin <- request$get_header("Origin")
+  set_cors_headers(response, origin)
+
+  return(response)
+}
+
+# Main request handler
+app$on("request", function(server, request, ...) {
+  start_time <- Sys.time()
+
+  # Extract origin for CORS
+  origin <- request$get_header("Origin")
+
+  # Extract client IP (consider X-Forwarded-For for proxied requests)
+  client_ip <- request$REMOTE_ADDR %||% "unknown"
+
+  # Log incoming request
+  log_message("INFO", "Incoming request", list(
+    path = request$path,
+    method = request$method,
+    ip = client_ip,
+    origin = origin %||% "none",
+    params = paste(sprintf("%s=%s", names(request$query),
+                          sapply(request$query, function(x) {
+                            s <- as.character(x)
+                            if (nchar(s) > 50) paste0(substr(s, 1, 47), "...") else s
+                          })), collapse = ", ")
+  ))
+
+  # CORS preflight (OPTIONS) request
+  if (request$method == "OPTIONS") {
+    if (!is_origin_allowed(origin)) {
+      log_message("WARN", "CORS rejected", list(ip = client_ip, origin = origin))
+      return(send_error(server, request, 403, "Origin not allowed"))
+    }
+
+    response <- request$respond()
+    response$status <- 204L  # No Content
+    set_cors_headers(response, origin)
+    log_message("INFO", "CORS preflight", list(origin = origin))
+    return(response)
+  }
+
+  # Check origin for non-OPTIONS requests
+  if (!is_origin_allowed(origin)) {
+    log_message("WARN", "CORS rejected", list(ip = client_ip, origin = origin))
+    return(send_error(server, request, 403, "Origin not allowed"))
+  }
+
+  # Health check endpoint
+  if (request$path == "/health") {
+    response <- request$respond()
+    response$body <- jsonlite::toJSON(list(
+      status = "ok",
+      timestamp = Sys.time(),
+      version = "1.0.0"
+    ), auto_unbox = TRUE)
+    response$status <- 200L
+    response$type <- "json"
+    set_cors_headers(response, origin)
+
+    log_message("INFO", "Health check", list(status = "ok"))
+    return(response)
+  }
+
+  # Rate limiting
+  if (!check_rate_limit(client_ip)) {
+    log_message("WARN", "Rate limit exceeded", list(ip = client_ip))
+    return(send_error(server, request, 429, "Rate limit exceeded. Maximum 100 requests per minute."))
+  }
+
+  # Validate request
+  validation <- validate_request(request$query, request$path)
+  if (!validation$valid) {
+    log_message("WARN", "Validation failed", list(
+      ip = client_ip,
+      error = validation$message
+    ))
+    return(send_error(server, request, validation$status, validation$message))
+  }
+
+  # Check cache for non-health endpoints
+  cache_key <- generate_cache_key(request$path, request$query)
+  cached_result <- get_cached_response(cache_key)
+
+  if (!is.null(cached_result)) {
+    log_message("INFO", "Cache hit", list(
+      path = request$path,
+      cache_key = substr(cache_key, 1, 100)
+    ))
+
+    response <- request$respond()
+    response$body <- jsonlite::toJSON(cached_result, auto_unbox = TRUE)
+    response$status <- 200L
+    response$type <- "json"
+    response$set_header("X-Cache", "HIT")
+    set_cors_headers(response, origin)
+    return(response)
+  }
+
+  # Parse parameters
+  y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
   h <- as.integer(request$query$h %||% 1)
   t <- as.integer(request$query$t %||% 0) == 1
 
-  if (request$path == "/") {
-    m <- request$query$m # Method
-    s <- as.integer(request$query$s) # Year = 1, Quarter = 2, ...
-    res <- handleForecast(y, h, m, s, t)
-  } else if (request$path == "/cum") {
-    res <- handleCumulativeForecast(y, h, t)
-  } else {
-    # Handle other routes
-    server$status(404)
-    server$send("Route not found")
+  # Process request with error handling
+  res <- tryCatch({
+    if (request$path == "/") {
+      m <- request$query$m
+      s <- as.integer(request$query$s)
+      handleForecast(y, h, m, s, t)
+    } else if (request$path == "/cum") {
+      handleCumulativeForecast(y, h, t)
+    } else {
+      log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
+      return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
+    }
+  }, error = function(e) {
+    log_message("ERROR", "Processing failed", list(
+      ip = client_ip,
+      path = request$path,
+      error = as.character(e)
+    ))
+    return(send_error(server, request, 500, paste("Internal server error:", as.character(e))))
+  })
+
+  # Check if error occurred (send_error returns a response object, not NULL)
+  if (inherits(res, "response")) {
+    return(res)
   }
 
-  if (!exists("res")) {
-    server$status(400)
-    server$send("Invalid request")
-    return()
-  }
+  # Store result in cache
+  set_cached_response(cache_key, res)
 
-  # Response
+  # Send successful response
   response <- request$respond()
-  response$body <- jsonlite::toJSON(res)
+  response$body <- jsonlite::toJSON(res, auto_unbox = TRUE)
   response$status <- 200L
   response$type <- "json"
+  response$set_header("X-Cache", "MISS")
+  set_cors_headers(response, origin)
+
+  # Log completion
+  duration_ms <- round(as.numeric(difftime(Sys.time(), start_time, units = "secs")) * 1000, 2)
+  log_message("INFO", "Request completed", list(
+    path = request$path,
+    ip = client_ip,
+    duration_ms = duration_ms,
+    status = 200,
+    cached = "yes"
+  ))
+
   response
 })
 
-app$ignite(showcase = FALSE)
-
-# source("./src/serve.r")
-# Force rebuild 1761166443
+# Start server (only when run directly, not when sourced for tests)
+if (sys.nframe() == 0) {
+  log_message("INFO", "Starting server", list(port = port))
+  app$ignite(showcase = FALSE)
+}
