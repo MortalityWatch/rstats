@@ -46,7 +46,10 @@ jobs:
             "fable",
             "fiery",
             "tsibble",
-            "testthat"
+            "testthat",
+            "httr",
+            "jsonlite",
+            "uuid"
           ), repos = "https://cloud.r-project.org/", Ncpus = 2)
         shell: Rscript {0}
 
