@@ -1,17 +1,38 @@
 FROM eddelbuettel/r2u:22.04
 
+# Metadata
+LABEL maintainer="MortalityWatch"
+LABEL description="R Statistical Forecasting Microservice"
+LABEL version="1.0.0"
+
 WORKDIR /opt/rstats
 
+# Install system dependencies
 RUN echo "Updating deps... $CACHEBUST"
-RUN apt-get update
-ADD dependencies.txt .
-RUN apt-get install -y $(cat dependencies.txt)
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# R deps
-ADD dependencies_r.txt .
-ADD install_r_deps.sh .
+# Copy and install dependencies (cached layer)
+COPY dependencies.txt .
+RUN if [ -s dependencies.txt ]; then apt-get update && apt-get install -y $(cat dependencies.txt) && rm -rf /var/lib/apt/lists/*; fi
+
+# Install R dependencies (cached layer)
+COPY dependencies_r.txt .
+COPY install_r_deps.sh .
 RUN /opt/rstats/install_r_deps.sh
 
+# Copy application code
 COPY src/ .
 
-CMD [ "Rscript", "serve.r"]
+# Expose port
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:5000/health || exit 1
+
+# Run as non-root user (optional, commented out for compatibility)
+# RUN useradd -m -u 1000 rstats && chown -R rstats:rstats /opt/rstats
+# USER rstats
+
+# Start server
+CMD ["Rscript", "serve.r"]
