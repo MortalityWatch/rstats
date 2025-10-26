@@ -30,9 +30,10 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -f http://localhost:5000/health || exit 1
 
-# Run as non-root user (optional, commented out for compatibility)
-# RUN useradd -m -u 1000 rstats && chown -R rstats:rstats /opt/rstats
-# USER rstats
+# Run as non-root user for security
+# Use UID 10000 to avoid conflicts with base image
+RUN useradd -m -u 10000 rstats && chown -R rstats:rstats /opt/rstats
+USER rstats
 
 # Start server
 CMD ["Rscript", "serve.r"]

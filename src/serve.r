@@ -11,14 +11,22 @@ library(tsibble)
 # Load utility functions and handlers
 source("utils.r")
 source("handlers.r")
+source("sentry.r")
+
+# Initialize Sentry error tracking
+init_sentry()
 
 # Server configuration
 port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "5000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
 # CORS configuration
+ALLOWED_ORIGINS_DEFAULT <- paste0(
+  "https://www.mortality.watch,https://mortality.watch,",
+  "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000"
+)
 ALLOWED_ORIGINS <- strsplit(
-  Sys.getenv("ALLOWED_ORIGINS", "https://www.mortality.watch,https://mortality.watch,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000"),
+  Sys.getenv("ALLOWED_ORIGINS", ALLOWED_ORIGINS_DEFAULT),
   ","
 )[[1]]
 
@@ -165,7 +173,11 @@ validate_request <- function(query, path) {
     # Validate 's' (seasonality)
     s <- as.integer(query$s)
     if (is.na(s) || !s %in% c(1, 2, 3, 4)) {
-      return(list(valid = FALSE, status = 400, message = "Parameter 's' must be 1 (year), 2 (quarter), 3 (month), or 4 (week)"))
+      return(list(
+        valid = FALSE,
+        status = 400,
+        message = "Parameter 's' must be 1 (year), 2 (quarter), 3 (month), or 4 (week)"
+      ))
     }
 
     # Validate 'm' (method)
@@ -292,6 +304,12 @@ app$on("request", function(server, request, ...) {
     return(send_error(server, request, 429, "Rate limit exceeded. Maximum 100 requests per minute."))
   }
 
+  # Check if route exists (before parameter validation)
+  if (!request$path %in% c("/", "/cum")) {
+    log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
+    return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
+  }
+
   # Validate request
   validation <- validate_request(request$query, request$path)
   if (!validation$valid) {
@@ -332,11 +350,9 @@ app$on("request", function(server, request, ...) {
       m <- request$query$m
       s <- as.integer(request$query$s)
       handleForecast(y, h, m, s, t)
-    } else if (request$path == "/cum") {
-      handleCumulativeForecast(y, h, t)
     } else {
-      log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
-      return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
+      # request$path == "/cum" (already validated above)
+      handleCumulativeForecast(y, h, t)
     }
   }, error = function(e) {
     log_message("ERROR", "Processing failed", list(
@@ -344,6 +360,21 @@ app$on("request", function(server, request, ...) {
       path = request$path,
       error = as.character(e)
     ))
+
+    # Capture exception in Sentry
+    capture_exception(e,
+      extra = list(
+        path = request$path,
+        method = request$method,
+        query = paste(names(request$query), unlist(request$query), sep = "=", collapse = "&"),
+        ip = client_ip
+      ),
+      tags = list(
+        endpoint = request$path,
+        method = request$method
+      )
+    )
+
     return(send_error(server, request, 500, paste("Internal server error:", as.character(e))))
   })
 

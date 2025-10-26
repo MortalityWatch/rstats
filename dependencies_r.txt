@@ -2,6 +2,8 @@ tibble
 fable
 tidyverse
 fiery
-future.apply
 tsibble
 testthat
+sentryR
+httr
+jsonlite

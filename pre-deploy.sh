@@ -2,8 +2,10 @@
 
 # Plugins now auto-installed from deployments/config.json
 
+APP_NAME="rstats-mortality-watch"
+
 # Enable CORS plugin for this app
-ssh co "dokku nginx-cors:enable rstats-mortality-watch"
+ssh co "dokku nginx-cors:enable ${APP_NAME}"
 
 # Enable cache plugin for this app
 ssh co "dokku nginx-cache:enable ${APP_NAME}"

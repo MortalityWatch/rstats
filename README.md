@@ -18,6 +18,7 @@ This microservice provides HTTP endpoints for time series forecasting and statis
 - **Health Monitoring**: `/health` endpoint for service monitoring
 - **Structured Logging**: Detailed request tracking with timestamps
 - **Input Validation**: Comprehensive parameter checking with descriptive errors
+- **Error Tracking**: Sentry integration for production error monitoring
 
 ## Technology Stack
 
@@ -58,6 +59,11 @@ docker run -p 5000:5000 rstats-service
 |----------|---------|-------------|
 | `PORT` | `5000` | HTTP server port |
 | `ALLOWED_ORIGINS` | `https://www.mortality.watch,https://mortality.watch` | Comma-separated list of allowed CORS origins |
+| `SENTRY_DSN` | _(empty)_ | Sentry DSN for error tracking (optional) |
+| `SENTRY_ENVIRONMENT` | `production` | Sentry environment name |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.1` | Sentry performance monitoring sample rate (0.0-1.0) |
+
+**Note**: Copy `.env.example` to `.env` and configure as needed for local development.
 
 ## API Documentation
 
@@ -187,7 +193,47 @@ RATE_LIMIT_WINDOW <- 60         # seconds
 RATE_LIMIT_MAX_REQUESTS <- 100  # requests
 ```
 
-## Security Features
+## Security & Monitoring
+
+### Sentry Error Tracking
+
+The service supports Sentry integration for production error monitoring and performance tracking.
+
+**Setup:**
+
+1. Create a Sentry project at [sentry.io](https://sentry.io/) or use a self-hosted instance (e.g., Bugsink)
+2. Get your DSN from the project settings
+3. Configure environment variables:
+
+   **For local development:**
+   ```bash
+   export SENTRY_DSN="https://your-key@your-org.ingest.sentry.io/your-project-id"
+   export SENTRY_ENVIRONMENT="development"
+   export SENTRY_TRACES_SAMPLE_RATE="0.1"
+   ```
+
+   **For production (Dokku):**
+   Environment variables are automatically configured via `deployments/config.json`:
+   ```json
+   "env_vars": {
+     "SENTRY_DSN": "https://key@sentry.mortality.watch/3",
+     "SENTRY_ENVIRONMENT": "production",
+     "SENTRY_TRACES_SAMPLE_RATE": "0.1"
+   }
+   ```
+
+**Features:**
+- Automatic exception capture with stack traces
+- Request context (path, query params, IP)
+- Environment and server metadata
+- Custom tags for filtering (endpoint, method)
+
+**Logs:**
+```
+[2025-10-26 12:00:00] INFO: Sentry initialized - environment=production, traces_sample_rate=0.1
+```
+
+If `SENTRY_DSN` is not configured, error tracking is disabled and the service runs normally.
 
 ### CORS (Cross-Origin Resource Sharing)
 
@@ -232,25 +278,45 @@ export ALLOWED_ORIGINS="https://www.mortality.watch,https://mortality.watch,http
 ├── src/
 │   ├── serve.r           # Main server and routing
 │   ├── handlers.r        # Forecast request handlers
-│   └── utils.r           # Statistical utility functions
+│   ├── utils.r           # Statistical utility functions
+│   └── sentry.r          # Error tracking integration
 ├── tests/
 │   ├── test_utils.r      # Tests for utility functions
 │   ├── test_validation.r # Tests for validation/caching
+│   ├── test_integration.r # API integration tests
 │   └── run_tests.r       # Test runner
 ├── dependencies_r.txt    # R package dependencies
 ├── dependencies.txt      # System dependencies
 ├── install_r_deps.sh     # Dependency installer
 ├── Dockerfile            # Container configuration
+├── .env.example          # Environment variables template
+├── CONTRIBUTING.md       # Contribution guidelines
 └── README.md            # This file
 ```
 
 ## Testing
 
-Run the test suite:
+### Unit Tests
+
+Run unit tests for utilities and validation:
 
 ```bash
 cd tests
-./run_tests.r
+Rscript test_utils.r
+Rscript test_validation.r
+```
+
+### Integration Tests
+
+Integration tests require a running server:
+
+```bash
+# Terminal 1: Start the server
+Rscript src/serve.r
+
+# Terminal 2: Run integration tests
+cd tests
+Rscript test_integration.r
 ```
 
 Tests cover:
@@ -259,6 +325,8 @@ Tests cover:
 - Caching logic
 - Rate limiting
 - Error handling
+- Full API workflows
+- CORS functionality
 
 ## Deployment
 
@@ -281,6 +349,9 @@ dokku nginx-cache:enable rstats-mortality-watch
 - The service runs on port 5000 internally (configurable via `PORT` env var)
 - Dokku automatically proxies external port 80 to internal port 5000
 - No explicit port mapping needed in `deployments/config.json`
+
+**Environment Variables:**
+Environment variables (including Sentry configuration) are automatically configured via the central deployment system at `~/dev/co/deployments/config.json`.
 
 Pre-deployment script: `pre-deploy.sh`
 
@@ -365,6 +436,24 @@ This program is free software: you can redistribute it and/or modify it under th
 - **Documentation**: See comments in source files for detailed function documentation
 
 ## Changelog
+
+### v1.1.0 (TBD)
+
+**New Features:**
+- ✨ Sentry integration for error tracking and monitoring
+- ✨ Integration tests for full API workflow testing
+- ✨ CONTRIBUTING.md with contribution guidelines
+
+**Improvements:**
+- 🔒 Docker now runs as non-root user for security
+- ✅ CI now runs all tests (including test_validation.r)
+- ✅ Linting now enforced in CI (no longer optional)
+- 📝 Added .env.example template for environment variables
+- 🐛 Fixed pre-deploy.sh variable inconsistency
+- 🧹 Removed unused future.apply dependency
+
+**Breaking Changes:**
+- None (API remains backwards compatible)
 
 ### v1.0.0 (2025-10-26)
 
