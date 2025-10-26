@@ -11,6 +11,10 @@ library(tsibble)
 # Load utility functions and handlers
 source("utils.r")
 source("handlers.r")
+source("sentry.r")
+
+# Initialize Sentry error tracking
+init_sentry()
 
 # Server configuration
 port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "5000")
@@ -344,6 +348,21 @@ app$on("request", function(server, request, ...) {
       path = request$path,
       error = as.character(e)
     ))
+
+    # Capture exception in Sentry
+    capture_exception(e,
+      extra = list(
+        path = request$path,
+        method = request$method,
+        query = paste(names(request$query), unlist(request$query), sep = "=", collapse = "&"),
+        ip = client_ip
+      ),
+      tags = list(
+        endpoint = request$path,
+        method = request$method
+      )
+    )
+
     return(send_error(server, request, 500, paste("Internal server error:", as.character(e))))
   })
 
