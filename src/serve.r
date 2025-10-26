@@ -376,6 +376,8 @@ app$on("request", function(server, request, ...) {
   response
 })
 
-# Start server
-log_message("INFO", "Starting server", list(port = port))
-app$ignite(showcase = FALSE)
+# Start server (only when run directly, not when sourced for tests)
+if (sys.nframe() == 0) {
+  log_message("INFO", "Starting server", list(port = port))
+  app$ignite(showcase = FALSE)
+}

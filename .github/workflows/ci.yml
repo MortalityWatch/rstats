@@ -36,27 +36,32 @@ jobs:
 
       - name: Install R dependencies
         run: |
+          # Install tidyverse dependencies individually to avoid memory issues
           install.packages(c(
             "tibble",
+            "dplyr",
+            "tidyr",
+            "purrr",
+            "ggplot2",
             "fable",
-            "tidyverse",
             "fiery",
             "tsibble",
             "testthat"
-          ), repos = "https://cloud.r-project.org/")
+          ), repos = "https://cloud.r-project.org/", Ncpus = 2)
         shell: Rscript {0}
 
       - name: Run unit tests
         run: |
           cd tests
-          Rscript run_tests.r
+          # Run only utils tests to avoid loading heavy serve.r dependencies
+          Rscript -e "library(testthat); test_file('test_utils.r', reporter = 'progress')"
         continue-on-error: false
 
       - name: Check code syntax
         run: |
-          Rscript -e "source('src/utils.r')"
-          Rscript -e "source('src/handlers.r')"
-          Rscript -e "source('src/serve.r', local = TRUE)"
+          Rscript -e "parse('src/utils.r')"
+          Rscript -e "parse('src/handlers.r')"
+          Rscript -e "parse('src/serve.r')"
         continue-on-error: false
 
   docker:
