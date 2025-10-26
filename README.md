@@ -196,6 +196,9 @@ The service implements strict CORS policies to only allow requests from whitelis
 **Default allowed origins:**
 - `https://www.mortality.watch`
 - `https://mortality.watch`
+- `http://localhost:3000` (local dev)
+- `http://localhost:3001` (local dev)
+- `http://127.0.0.1:3000` (local dev)
 
 **How it works:**
 - Requests from non-whitelisted origins receive HTTP 403
