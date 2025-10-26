@@ -4,6 +4,4 @@ tidyverse
 fiery
 tsibble
 testthat
-httr
-jsonlite
-uuid
+sentryR
