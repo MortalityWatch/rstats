@@ -83,15 +83,29 @@ jobs:
       - name: Test Docker image runs
         run: |
           docker run -d --name rstats-test -p 5000:5000 rstats-service:test
-          sleep 15
 
-          # Test health endpoint
-          curl -f http://localhost:5000/health || exit 1
+          echo "Waiting for R server to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:5000/health > /dev/null 2>&1; then
+              echo "Server is up after ${i} seconds!"
+              break
+            fi
+            echo "Attempt $i/30: Server not ready yet..."
+            sleep 2
+          done
 
-          # Test basic forecast endpoint
-          curl -f "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=mean&t=0" || exit 1
+          echo "=== Docker container status ==="
+          docker ps -a | grep rstats-test
 
+          echo "=== Server logs ==="
           docker logs rstats-test
+
+          echo "=== Testing health endpoint ==="
+          curl -v http://localhost:5000/health || exit 1
+
+          echo "=== Testing forecast endpoint ==="
+          curl -v "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=mean&t=0" || exit 1
+
           docker stop rstats-test
 
   lint:
