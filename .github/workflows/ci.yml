@@ -120,7 +120,7 @@ jobs:
           use-public-rspm: true
 
       - name: Install R test dependencies
-        run: install.packages(c("testthat", "httr", "jsonlite", "uuid"), repos = "https://cloud.r-project.org/")
+        run: install.packages(c("testthat", "httr", "jsonlite"), repos = "https://cloud.r-project.org/")
         shell: Rscript {0}
 
       - name: Run integration tests
