@@ -21,6 +21,54 @@ rate_limit_store <- new.env()
 RATE_LIMIT_WINDOW <- 60 # seconds
 RATE_LIMIT_MAX_REQUESTS <- 100 # max requests per window
 
+# Response cache
+cache_store <- new.env()
+CACHE_TTL <- 3600 # 1 hour in seconds
+
+#' Generate cache key from request parameters
+#'
+#' @param path Request path
+#' @param query Query parameters
+#' @return String cache key
+generate_cache_key <- function(path, query) {
+  # Sort query parameters for consistent keys
+  sorted_params <- query[order(names(query))]
+  param_str <- paste(sprintf("%s=%s", names(sorted_params), unlist(sorted_params)), collapse = "&")
+  paste0(path, "?", param_str)
+}
+
+#' Get cached response if valid
+#'
+#' @param cache_key Cache key string
+#' @return Cached response or NULL if not found/expired
+get_cached_response <- function(cache_key) {
+  if (!exists(cache_key, envir = cache_store)) {
+    return(NULL)
+  }
+
+  cache_entry <- cache_store[[cache_key]]
+  current_time <- as.numeric(Sys.time())
+
+  if (current_time - cache_entry$timestamp > CACHE_TTL) {
+    # Cache expired
+    rm(list = cache_key, envir = cache_store)
+    return(NULL)
+  }
+
+  return(cache_entry$response)
+}
+
+#' Store response in cache
+#'
+#' @param cache_key Cache key string
+#' @param response Response object to cache
+set_cached_response <- function(cache_key, response) {
+  cache_store[[cache_key]] <- list(
+    response = response,
+    timestamp = as.numeric(Sys.time())
+  )
+}
+
 #' Check rate limit for IP address
 #'
 #' @param ip IP address string
@@ -186,6 +234,24 @@ app$on("request", function(server, request, ...) {
     return()
   }
 
+  # Check cache for non-health endpoints
+  cache_key <- generate_cache_key(request$path, request$query)
+  cached_result <- get_cached_response(cache_key)
+
+  if (!is.null(cached_result)) {
+    log_message("INFO", "Cache hit", list(
+      path = request$path,
+      cache_key = substr(cache_key, 1, 100)
+    ))
+
+    response <- request$respond()
+    response$body <- jsonlite::toJSON(cached_result, auto_unbox = TRUE)
+    response$status <- 200L
+    response$type <- "json"
+    response$headers$set("X-Cache", "HIT")
+    return(response)
+  }
+
   # Parse parameters
   y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
   h <- as.integer(request$query$h %||% 1)
@@ -219,11 +285,15 @@ app$on("request", function(server, request, ...) {
     return()
   }
 
+  # Store result in cache
+  set_cached_response(cache_key, res)
+
   # Send successful response
   response <- request$respond()
   response$body <- jsonlite::toJSON(res, auto_unbox = TRUE)
   response$status <- 200L
   response$type <- "json"
+  response$headers$set("X-Cache", "MISS")
 
   # Log completion
   duration_ms <- round(as.numeric(difftime(Sys.time(), start_time, units = "secs")) * 1000, 2)
@@ -231,7 +301,8 @@ app$on("request", function(server, request, ...) {
     path = request$path,
     ip = client_ip,
     duration_ms = duration_ms,
-    status = 200
+    status = 200,
+    cached = "yes"
   ))
 
   response
