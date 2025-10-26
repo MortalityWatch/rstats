@@ -163,7 +163,10 @@ jobs:
           lints <- lint_dir("src", linters = linters_with_defaults(
             line_length_linter(120),
             object_name_linter = NULL,
-            commented_code_linter = NULL
+            commented_code_linter = NULL,
+            object_usage_linter = NULL,  # Disable - false positives with tidyverse/fable
+            return_linter = NULL,         # Disable - R allows implicit returns
+            indentation_linter = NULL     # Disable - conflicts with pipe formatting
           ))
           print(lints)
           if (length(lints) > 0) {

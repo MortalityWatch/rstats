@@ -22,7 +22,10 @@ app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
 # CORS configuration
 ALLOWED_ORIGINS <- strsplit(
-  Sys.getenv("ALLOWED_ORIGINS", "https://www.mortality.watch,https://mortality.watch,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000"),
+  Sys.getenv(
+    "ALLOWED_ORIGINS",
+    "https://www.mortality.watch,https://mortality.watch,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000"
+  ),
   ","
 )[[1]]
 
@@ -169,7 +172,11 @@ validate_request <- function(query, path) {
     # Validate 's' (seasonality)
     s <- as.integer(query$s)
     if (is.na(s) || !s %in% c(1, 2, 3, 4)) {
-      return(list(valid = FALSE, status = 400, message = "Parameter 's' must be 1 (year), 2 (quarter), 3 (month), or 4 (week)"))
+      return(list(
+        valid = FALSE,
+        status = 400,
+        message = "Parameter 's' must be 1 (year), 2 (quarter), 3 (month), or 4 (week)"
+      ))
     }
 
     # Validate 'm' (method)

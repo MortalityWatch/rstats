@@ -201,13 +201,25 @@ The service supports Sentry integration for production error monitoring and perf
 
 **Setup:**
 
-1. Create a Sentry project at [sentry.io](https://sentry.io/)
+1. Create a Sentry project at [sentry.io](https://sentry.io/) or use a self-hosted instance (e.g., Bugsink)
 2. Get your DSN from the project settings
 3. Configure environment variables:
+
+   **For local development:**
    ```bash
    export SENTRY_DSN="https://your-key@your-org.ingest.sentry.io/your-project-id"
-   export SENTRY_ENVIRONMENT="production"
+   export SENTRY_ENVIRONMENT="development"
    export SENTRY_TRACES_SAMPLE_RATE="0.1"
+   ```
+
+   **For production (Dokku):**
+   Environment variables are automatically configured via `deployments/config.json`:
+   ```json
+   "env_vars": {
+     "SENTRY_DSN": "https://key@sentry.mortality.watch/3",
+     "SENTRY_ENVIRONMENT": "production",
+     "SENTRY_TRACES_SAMPLE_RATE": "0.1"
+   }
    ```
 
 **Features:**
@@ -337,6 +349,9 @@ dokku nginx-cache:enable rstats-mortality-watch
 - The service runs on port 5000 internally (configurable via `PORT` env var)
 - Dokku automatically proxies external port 80 to internal port 5000
 - No explicit port mapping needed in `deployments/config.json`
+
+**Environment Variables:**
+Environment variables (including Sentry configuration) are automatically configured via the central deployment system at `~/dev/co/deployments/config.json`.
 
 Pre-deployment script: `pre-deploy.sh`
 
