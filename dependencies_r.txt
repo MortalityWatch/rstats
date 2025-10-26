@@ -5,3 +5,5 @@ fiery
 tsibble
 testthat
 sentryR
+httr
+jsonlite
