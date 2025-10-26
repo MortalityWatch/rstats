@@ -304,6 +304,12 @@ app$on("request", function(server, request, ...) {
     return(send_error(server, request, 429, "Rate limit exceeded. Maximum 100 requests per minute."))
   }
 
+  # Check if route exists (before parameter validation)
+  if (!request$path %in% c("/", "/cum")) {
+    log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
+    return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
+  }
+
   # Validate request
   validation <- validate_request(request$query, request$path)
   if (!validation$valid) {
@@ -344,11 +350,9 @@ app$on("request", function(server, request, ...) {
       m <- request$query$m
       s <- as.integer(request$query$s)
       handleForecast(y, h, m, s, t)
-    } else if (request$path == "/cum") {
-      handleCumulativeForecast(y, h, t)
     } else {
-      log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
-      return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
+      # request$path == "/cum" (already validated above)
+      handleCumulativeForecast(y, h, t)
     }
   }, error = function(e) {
     log_message("ERROR", "Processing failed", list(
