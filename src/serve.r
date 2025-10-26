@@ -201,10 +201,10 @@ set_cors_headers <- function(response, origin) {
   }
 
   if (is_origin_allowed(origin)) {
-    response$headers$set("Access-Control-Allow-Origin", origin)
-    response$headers$set("Access-Control-Allow-Methods", "GET, OPTIONS")
-    response$headers$set("Access-Control-Allow-Headers", "Content-Type")
-    response$headers$set("Access-Control-Max-Age", "3600")
+    response$set_header("Access-Control-Allow-Origin", origin)
+    response$set_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response$set_header("Access-Control-Allow-Headers", "Content-Type")
+    response$set_header("Access-Control-Max-Age", "3600")
   }
 }
 
@@ -221,7 +221,7 @@ send_error <- function(server, request, status, message) {
   response$type <- "json"
 
   # Set CORS headers
-  origin <- request$headers$get("Origin")
+  origin <- request$get_header("Origin")
   set_cors_headers(response, origin)
 
   return(response)
@@ -232,7 +232,7 @@ app$on("request", function(server, request, ...) {
   start_time <- Sys.time()
 
   # Extract origin for CORS
-  origin <- request$headers$get("Origin")
+  origin <- request$get_header("Origin")
 
   # Extract client IP (consider X-Forwarded-For for proxied requests)
   client_ip <- request$REMOTE_ADDR %||% "unknown"
@@ -316,7 +316,7 @@ app$on("request", function(server, request, ...) {
     response$body <- jsonlite::toJSON(cached_result, auto_unbox = TRUE)
     response$status <- 200L
     response$type <- "json"
-    response$headers$set("X-Cache", "HIT")
+    response$set_header("X-Cache", "HIT")
     set_cors_headers(response, origin)
     return(response)
   }
@@ -360,7 +360,7 @@ app$on("request", function(server, request, ...) {
   response$body <- jsonlite::toJSON(res, auto_unbox = TRUE)
   response$status <- 200L
   response$type <- "json"
-  response$headers$set("X-Cache", "MISS")
+  response$set_header("X-Cache", "MISS")
   set_cors_headers(response, origin)
 
   # Log completion
