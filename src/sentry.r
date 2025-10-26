@@ -19,13 +19,18 @@ sentry_config <- list(
 init_sentry <- function() {
   if (sentry_config$dsn != "") {
     sentry_config$enabled <<- TRUE
-    log_message("INFO", "Sentry initialized", list(
-      environment = sentry_config$environment,
-      traces_sample_rate = sentry_config$traces_sample_rate
+    message(sprintf(
+      "[%s] INFO: Sentry initialized - environment=%s, traces_sample_rate=%s",
+      format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      sentry_config$environment,
+      sentry_config$traces_sample_rate
     ))
     return(TRUE)
   } else {
-    log_message("INFO", "Sentry not configured (SENTRY_DSN not set)")
+    message(sprintf(
+      "[%s] INFO: Sentry not configured (SENTRY_DSN not set)",
+      format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    ))
     return(FALSE)
   }
 }

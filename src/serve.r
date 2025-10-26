@@ -21,11 +21,12 @@ port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "5000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
 # CORS configuration
+ALLOWED_ORIGINS_DEFAULT <- paste0(
+  "https://www.mortality.watch,https://mortality.watch,",
+  "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000"
+)
 ALLOWED_ORIGINS <- strsplit(
-  Sys.getenv(
-    "ALLOWED_ORIGINS",
-    "https://www.mortality.watch,https://mortality.watch,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000"
-  ),
+  Sys.getenv("ALLOWED_ORIGINS", ALLOWED_ORIGINS_DEFAULT),
   ","
 )[[1]]
 
