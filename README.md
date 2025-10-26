@@ -1,5 +1,7 @@
 # R Stats Microservice
 
+[![CI](https://github.com/MortalityWatch/rstats.mortality.watch/actions/workflows/ci.yml/badge.svg)](https://github.com/MortalityWatch/rstats.mortality.watch/actions/workflows/ci.yml)
+
 Statistical forecasting API for mortality data baseline calculations.
 
 ## Overview

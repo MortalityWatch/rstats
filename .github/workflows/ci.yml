@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main, feature/** ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.2'
+          use-public-rspm: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl bash vim
+
+      - name: Install R dependencies
+        run: |
+          install.packages(c(
+            "tibble",
+            "fable",
+            "tidyverse",
+            "fiery",
+            "tsibble",
+            "testthat"
+          ), repos = "https://cloud.r-project.org/")
+        shell: Rscript {0}
+
+      - name: Run unit tests
+        run: |
+          cd tests
+          Rscript run_tests.r
+        continue-on-error: false
+
+      - name: Check code syntax
+        run: |
+          Rscript -e "source('src/utils.r')"
+          Rscript -e "source('src/handlers.r')"
+          Rscript -e "source('src/serve.r', local = TRUE)"
+        continue-on-error: false
+
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: rstats-service:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image runs
+        run: |
+          docker run -d --name rstats-test -p 5000:5000 rstats-service:test
+          sleep 10
+
+          # Test health endpoint
+          curl -f http://localhost:5000/health || exit 1
+
+          # Test basic forecast endpoint
+          curl -f "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=mean&t=0" || exit 1
+
+          docker stop rstats-test
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.2'
+
+      - name: Install lintr
+        run: install.packages("lintr", repos = "https://cloud.r-project.org/")
+        shell: Rscript {0}
+
+      - name: Lint R code
+        run: |
+          library(lintr)
+          lint_dir("src", linters = linters_with_defaults(
+            line_length_linter(120),
+            object_name_linter = NULL,
+            commented_code_linter = NULL
+          ))
+        shell: Rscript {0}
+        continue-on-error: true
