@@ -67,6 +67,7 @@ jobs:
         with:
           context: .
           push: false
+          load: true  # Load image into Docker daemon for testing
           tags: rstats-service:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -74,7 +75,7 @@ jobs:
       - name: Test Docker image runs
         run: |
           docker run -d --name rstats-test -p 5000:5000 rstats-service:test
-          sleep 10
+          sleep 15
 
           # Test health endpoint
           curl -f http://localhost:5000/health || exit 1
@@ -82,6 +83,7 @@ jobs:
           # Test basic forecast endpoint
           curl -f "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=mean&t=0" || exit 1
 
+          docker logs rstats-test
           docker stop rstats-test
 
   lint:
