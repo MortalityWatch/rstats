@@ -121,12 +121,13 @@ cumForecastN <- function(df_train, df_test, mdl) {
 #' @param t Boolean whether to include trend
 #' @return List with y (fitted + forecast), lower, and upper bounds
 handleCumulativeForecast <- function(y, h, t) {
-  z <- length(y) - h
+  n <- length(y)
 
-  df <- tibble(year = seq.int(1, length(y)), asmr = y) |>
+  df <- tibble(year = seq.int(1, n), asmr = y) |>
     as_tsibble(index = year)
 
-  df_train <- df |> filter(year <= z)
+  # Use ALL input data for training
+  df_train <- df
 
   # Fit model with or without trend
   if (t) {
@@ -143,7 +144,10 @@ handleCumulativeForecast <- function(y, h, t) {
   # Generate cumulative forecasts for each horizon
   result <- tibble()
   for (h_ in 1:h) {
-    df_test <- df |> filter(year %in% (z + 1):(z + h_))
+    # Create future time periods using fabletools::new_data
+    # Use placeholder value 0 for asmr (not used in predictions, just needed for model.matrix)
+    df_test <- new_data(df_train, n = h_) |>
+      mutate(asmr = 0)
     result <- rbind(result, cumForecastN(df_train, df_test, mdl))
   }
 
