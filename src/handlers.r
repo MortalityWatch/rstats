@@ -53,11 +53,11 @@ handleForecast <- function(y, h, m, s, t) {
           med = median(asmr, na.rm = TRUE),
           lower = quantile(asmr, 0.025, na.rm = TRUE),
           upper = quantile(asmr, 0.975, na.rm = TRUE),
-          .groups = 'drop'
+          .groups = "drop"
         )
 
       # Create forecast by repeating seasonal pattern
-      forecast_seasons <- (nrow(df) + 0:(h-1)) %% s
+      forecast_seasons <- (nrow(df) + 0:(h - 1)) %% s
       fc_values <- seasonal_medians$med[match(forecast_seasons, seasonal_medians$season_idx)]
       fc_lower <- seasonal_medians$lower[match(forecast_seasons, seasonal_medians$season_idx)]
       fc_upper <- seasonal_medians$upper[match(forecast_seasons, seasonal_medians$season_idx)]
