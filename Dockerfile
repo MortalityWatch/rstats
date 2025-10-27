@@ -23,9 +23,6 @@ RUN /opt/stats/install_r_deps.sh
 # Copy application code
 COPY src/ .
 
-# Expose port
-EXPOSE 5000
-
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -f http://localhost:5000/health || exit 1
