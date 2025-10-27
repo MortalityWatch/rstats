@@ -1,6 +1,6 @@
 # R Stats Microservice
 
-[![CI](https://github.com/MortalityWatch/rstats.mortality.watch/actions/workflows/ci.yml/badge.svg)](https://github.com/MortalityWatch/rstats.mortality.watch/actions/workflows/ci.yml)
+[![CI](https://github.com/MortalityWatch/stats.mortality.watch/actions/workflows/ci.yml/badge.svg)](https://github.com/MortalityWatch/stats.mortality.watch/actions/workflows/ci.yml)
 
 Statistical forecasting API for mortality data baseline calculations.
 
@@ -47,10 +47,10 @@ Rscript src/serve.r
 
 ```bash
 # Build image
-docker build -t rstats-service .
+docker build -t stats-service .
 
 # Run container
-docker run -p 5000:5000 rstats-service
+docker run -p 5000:5000 stats-service
 ```
 
 ### Environment Variables
@@ -339,10 +339,10 @@ The service is configured for Dokku deployment with nginx plugins:
 git push dokku master
 
 # Enable CORS
-dokku nginx-cors:enable rstats-mortality-watch
+dokku nginx-cors:enable stats-mortality-watch
 
 # Enable caching
-dokku nginx-cache:enable rstats-mortality-watch
+dokku nginx-cache:enable stats-mortality-watch
 ```
 
 **Port Configuration:**
@@ -360,7 +360,7 @@ Pre-deployment script: `pre-deploy.sh`
 ```yaml
 version: '3.8'
 services:
-  rstats:
+  stats:
     build: .
     ports:
       - "5000:5000"

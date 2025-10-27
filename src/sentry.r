@@ -13,7 +13,7 @@ init_sentry <- function() {
   if (dsn != "") {
     configure_sentry(
       dsn = dsn,
-      app_name = "rstats.mortality.watch",
+      app_name = "stats.mortality.watch",
       app_version = Sys.getenv("APP_VERSION", "1.0.0"),
       environment = Sys.getenv("SENTRY_ENVIRONMENT", "production")
     )

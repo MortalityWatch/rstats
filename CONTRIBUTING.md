@@ -36,13 +36,13 @@ This project adheres to a code of conduct that all contributors are expected to 
 
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/rstats.mortality.watch.git
-   cd rstats.mortality.watch
+   git clone https://github.com/YOUR_USERNAME/stats.mortality.watch.git
+   cd stats.mortality.watch
    ```
 
 3. **Add upstream remote**:
    ```bash
-   git remote add upstream https://github.com/MortalityWatch/rstats.mortality.watch.git
+   git remote add upstream https://github.com/MortalityWatch/stats.mortality.watch.git
    ```
 
 4. **Install dependencies**:
