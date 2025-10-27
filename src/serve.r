@@ -182,8 +182,8 @@ validate_request <- function(query, path) {
 
     # Validate 'm' (method)
     m <- query$m
-    if (is.null(m) || !m %in% c("naive", "mean", "lin_reg", "exp")) {
-      return(list(valid = FALSE, status = 400, message = "Parameter 'm' must be one of: naive, mean, lin_reg, exp"))
+    if (is.null(m) || !m %in% c("naive", "mean", "median", "lin_reg", "exp")) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'm' must be one of: naive, mean, median, lin_reg, exp"))
     }
   }
 
