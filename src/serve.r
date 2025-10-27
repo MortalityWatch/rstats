@@ -231,7 +231,11 @@ app$on("request", function(server, request, ...) {
   # Rate limiting
   if (!check_rate_limit(client_ip)) {
     log_message("WARN", "Rate limit exceeded", list(ip = client_ip))
-    return(send_error(server, request, 429, paste0("Rate limit exceeded. Maximum ", RATE_LIMIT_MAX_REQUESTS, " requests per ", RATE_LIMIT_WINDOW, " seconds.")))
+    error_msg <- paste0(
+      "Rate limit exceeded. Maximum ", RATE_LIMIT_MAX_REQUESTS,
+      " requests per ", RATE_LIMIT_WINDOW, " seconds."
+    )
+    return(send_error(server, request, 429, error_msg))
   }
 
   # Check if route exists (before parameter validation)

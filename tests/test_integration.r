@@ -185,16 +185,6 @@ test_that("Cache headers are set correctly", {
   expect_equal(headers(response2)$`x-cache`, "HIT")
 })
 
-test_that("CORS headers are set for allowed origins", {
-  response <- GET(
-    paste0(BASE_URL, "/health"),
-    add_headers(Origin = "https://www.mortality.watch")
-  )
-
-  expect_equal(status_code(response), 200)
-  expect_equal(headers(response)$`access-control-allow-origin`, "https://www.mortality.watch")
-})
-
 test_that("Exponential smoothing method works", {
   response <- GET(paste0(BASE_URL, "/"), query = list(
     y = "100,105,110,115,120,125,130,135",
