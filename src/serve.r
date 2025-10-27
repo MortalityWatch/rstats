@@ -32,8 +32,8 @@ ALLOWED_ORIGINS <- strsplit(
 
 # Rate limiting state
 rate_limit_store <- new.env()
-RATE_LIMIT_WINDOW <- 60 # seconds
-RATE_LIMIT_MAX_REQUESTS <- 100 # max requests per window
+RATE_LIMIT_WINDOW <- as.integer(Sys.getenv("RATE_LIMIT_WINDOW", "60")) # seconds
+RATE_LIMIT_MAX_REQUESTS <- as.integer(Sys.getenv("RATE_LIMIT_MAX_REQUESTS", "1000")) # max requests per window
 
 # Response cache
 cache_store <- new.env()
@@ -301,7 +301,7 @@ app$on("request", function(server, request, ...) {
   # Rate limiting
   if (!check_rate_limit(client_ip)) {
     log_message("WARN", "Rate limit exceeded", list(ip = client_ip))
-    return(send_error(server, request, 429, "Rate limit exceeded. Maximum 100 requests per minute."))
+    return(send_error(server, request, 429, paste0("Rate limit exceeded. Maximum ", RATE_LIMIT_MAX_REQUESTS, " requests per ", RATE_LIMIT_WINDOW, " seconds.")))
   }
 
   # Check if route exists (before parameter validation)
