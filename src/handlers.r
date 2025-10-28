@@ -40,6 +40,55 @@ handleForecast <- function(y, h, m, s, t) {
     } else {
       mdl <- df |> model(TSLM(asmr))
     }
+  } else if (m == "median") {
+    # Median forecast: use median of historical values (seasonal or overall)
+    if (s > 1) {
+      # Calculate seasonal medians using row numbers for season index
+      df_with_season <- df |>
+        mutate(season_idx = (row_number() - 1) %% s)
+
+      seasonal_medians <- df_with_season |>
+        group_by(season_idx) |>
+        summarise(
+          med = median(asmr, na.rm = TRUE),
+          lower = quantile(asmr, 0.025, na.rm = TRUE),
+          upper = quantile(asmr, 0.975, na.rm = TRUE),
+          .groups = "drop"
+        )
+
+      # Create forecast by repeating seasonal pattern
+      forecast_seasons <- (nrow(df) + 0:(h - 1)) %% s
+      fc_values <- seasonal_medians$med[match(forecast_seasons, seasonal_medians$season_idx)]
+      fc_lower <- seasonal_medians$lower[match(forecast_seasons, seasonal_medians$season_idx)]
+      fc_upper <- seasonal_medians$upper[match(forecast_seasons, seasonal_medians$season_idx)]
+
+      # Create fitted values
+      fitted_seasons <- (0:(nrow(df) - 1)) %% s
+      fitted_values <- seasonal_medians$med[match(fitted_seasons, seasonal_medians$season_idx)]
+
+      result <- tibble(
+        y = c(rep(NA, leading_NA), fitted_values, fc_values),
+        lower = c(rep(NA, leading_NA + nrow(df)), fc_lower),
+        upper = c(rep(NA, leading_NA + nrow(df)), fc_upper)
+      ) |>
+        mutate_if(is.numeric, round, 1)
+
+      return(list(y = result$y, lower = result$lower, upper = result$upper))
+    } else {
+      # Overall median
+      med_val <- median(df$asmr, na.rm = TRUE)
+      lower_val <- quantile(df$asmr, 0.025, na.rm = TRUE)
+      upper_val <- quantile(df$asmr, 0.975, na.rm = TRUE)
+
+      result <- tibble(
+        y = c(rep(NA, leading_NA), rep(med_val, nrow(df)), rep(med_val, h)),
+        lower = c(rep(NA, leading_NA + nrow(df)), rep(lower_val, h)),
+        upper = c(rep(NA, leading_NA + nrow(df)), rep(upper_val, h))
+      ) |>
+        mutate_if(is.numeric, round, 1)
+
+      return(list(y = result$y, lower = result$lower, upper = result$upper))
+    }
   } else if (m == "lin_reg") {
     if (t) {
       if (s > 1) {

@@ -44,7 +44,9 @@
       "Bash(fi)",
       "Bash(echo:*)",
       "Bash(done)",
-      "Bash(do if curl -s http://localhost:5010/health)"
+      "Bash(do if curl -s http://localhost:5010/health)",
+      "Bash(export PORT=5010)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []
