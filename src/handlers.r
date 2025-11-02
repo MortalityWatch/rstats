@@ -163,6 +163,8 @@ handleForecast <- function(y, h, m, s, t) {
 
   # Z-scores for observed data + forecast period
   # For forecast period, z-scores will be 0 (by definition)
+  # Rounded to 2 decimals for statistical precision (vs 1 decimal for y/lower/upper)
+  # because significance thresholds like ±1.96 require 2 decimal precision
   zscores <- rep(NA, length(result$y))
   zscores[(leading_NA + 1):(leading_NA + length(observed_clean))] <-
     round(residuals / residual_sd, 2)
