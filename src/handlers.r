@@ -73,7 +73,16 @@ handleForecast <- function(y, h, m, s, t) {
       ) |>
         mutate_if(is.numeric, round, 1)
 
-      return(list(y = result$y, lower = result$lower, upper = result$upper))
+      # Calculate z-scores from standardized residuals for seasonal median
+      residuals <- df$asmr - fitted_values
+      residual_sd <- sd(residuals, na.rm = TRUE)
+      zscores <- c(
+        rep(NA, leading_NA),
+        round(residuals / residual_sd, 2),
+        rep(0, h)
+      )
+
+      return(list(y = result$y, lower = result$lower, upper = result$upper, zscore = zscores))
     } else {
       # Overall median
       med_val <- median(df$asmr, na.rm = TRUE)
@@ -87,7 +96,16 @@ handleForecast <- function(y, h, m, s, t) {
       ) |>
         mutate_if(is.numeric, round, 1)
 
-      return(list(y = result$y, lower = result$lower, upper = result$upper))
+      # Calculate z-scores from standardized residuals for overall median
+      residuals <- df$asmr - med_val
+      residual_sd <- sd(residuals, na.rm = TRUE)
+      zscores <- c(
+        rep(NA, leading_NA),
+        round(residuals / residual_sd, 2),
+        rep(0, h)
+      )
+
+      return(list(y = result$y, lower = result$lower, upper = result$upper, zscore = zscores))
     }
   } else if (m == "lin_reg") {
     if (t) {
@@ -136,7 +154,22 @@ handleForecast <- function(y, h, m, s, t) {
   ) |>
     mutate_if(is.numeric, round, 1)
 
-  list(y = result$y, lower = result$lower, upper = result$upper)
+  # Calculate z-scores from standardized residuals
+  # This works for all baseline methods (mean, linear regression, exponential, etc.)
+  observed_clean <- y[!is.na(y)]
+  fitted_clean <- bl$.mean
+  residuals <- observed_clean - fitted_clean
+  residual_sd <- sd(residuals, na.rm = TRUE)
+
+  # Z-scores for observed data + forecast period
+  # For forecast period, z-scores will be 0 (by definition)
+  zscores <- rep(NA, length(result$y))
+  zscores[(leading_NA + 1):(leading_NA + length(observed_clean))] <-
+    round(residuals / residual_sd, 2)
+  zscores[(leading_NA + length(observed_clean) + 1):length(zscores)] <-
+    rep(0, h)
+
+  list(y = result$y, lower = result$lower, upper = result$upper, zscore = zscores)
 }
 
 #' Cumulative forecast for single horizon
@@ -200,10 +233,21 @@ handleCumulativeForecast <- function(y, h, t) {
     result <- rbind(result, cumForecastN(df_train, df_test, mdl))
   }
 
+  # Calculate z-scores from standardized residuals
+  residuals <- df_train$asmr - bl$.mean
+  residual_sd <- sd(residuals, na.rm = TRUE)
+
+  # Z-scores for observed data
+  zscores_obs <- round(residuals / residual_sd, 2)
+
+  # For forecast period, z-scores are 0 (no deviation from model)
+  zscores_fc <- rep(0, h)
+
   # Convert cumulative forecasts back to incremental values
   list(
     y = c(bl$.mean, uncumulate(result$asmr)),
     lower = c(rep(NA, nrow(bl)), uncumulate(result$lower)),
-    upper = c(rep(NA, nrow(bl)), uncumulate(result$upper))
+    upper = c(rep(NA, nrow(bl)), uncumulate(result$upper)),
+    zscore = c(zscores_obs, zscores_fc)
   )
 }

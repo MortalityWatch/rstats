@@ -111,9 +111,16 @@ curl "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=lin_reg&t=1
 {
   "y": [100.0, 105.2, 109.8, 108.1, 112.3, 115.0, 119.9, 124.5, 129.1, 133.7],
   "lower": [null, null, null, null, null, null, null, 120.2, 124.5, 128.8],
-  "upper": [null, null, null, null, null, null, null, 128.8, 133.7, 138.6]
+  "upper": [null, null, null, null, null, null, null, 128.8, 133.7, 138.6],
+  "zscore": [-0.15, 0.12, -0.05, -0.18, 0.08, -0.02, 0.20, 0.0, 0.0, 0.0]
 }
 ```
+
+**Response Fields:**
+- `y`: Fitted baseline values (for historical period) + forecast values (for future period)
+- `lower`: 95% prediction interval lower bound (only for forecast period)
+- `upper`: 95% prediction interval upper bound (only for forecast period)
+- `zscore`: Standardized residuals showing how many standard deviations each observed value is from the fitted baseline. Values beyond ±2 are statistically significant. Forecast period values are 0 (by definition).
 
 #### `GET /cum`
 
@@ -134,7 +141,8 @@ curl "http://localhost:5000/cum?y=1000,2100,3300,4600&h=2&t=1"
 {
   "y": [1000.0, 1100.0, 1200.0, 1300.0, 1400.0, 1500.0],
   "lower": [null, null, null, null, 1350.2, 1450.3],
-  "upper": [null, null, null, null, 1449.8, 1549.7]
+  "upper": [null, null, null, null, 1449.8, 1549.7],
+  "zscore": [-0.08, 0.15, -0.05, 0.12, 0.0, 0.0]
 }
 ```
 

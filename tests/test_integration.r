@@ -56,7 +56,9 @@ test_that("Forecast endpoint with valid parameters works", {
   expect_true("y" %in% names(body))
   expect_true("lower" %in% names(body))
   expect_true("upper" %in% names(body))
+  expect_true("zscore" %in% names(body))
   expect_equal(length(body$y), 10) # 7 original + 3 forecast
+  expect_equal(length(body$zscore), 10) # Same length as y
 })
 
 test_that("Forecast endpoint with trend parameter", {
