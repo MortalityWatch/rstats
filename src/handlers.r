@@ -78,7 +78,7 @@ handleForecast <- function(y, h, m, s, t) {
       residual_sd <- sd(residuals, na.rm = TRUE)
       zscores <- c(
         rep(NA, leading_NA),
-        round(residuals / residual_sd, 2),
+        round(residuals / residual_sd, 3),
         rep(0, h)
       )
 
@@ -101,7 +101,7 @@ handleForecast <- function(y, h, m, s, t) {
       residual_sd <- sd(residuals, na.rm = TRUE)
       zscores <- c(
         rep(NA, leading_NA),
-        round(residuals / residual_sd, 2),
+        round(residuals / residual_sd, 3),
         rep(0, h)
       )
 
@@ -163,11 +163,11 @@ handleForecast <- function(y, h, m, s, t) {
 
   # Z-scores for observed data + forecast period
   # For forecast period, z-scores will be 0 (by definition)
-  # Rounded to 2 decimals for statistical precision (vs 1 decimal for y/lower/upper)
-  # because significance thresholds like ±1.96 require 2 decimal precision
+  # Rounded to 3 decimals to provide precision for frontend decimal preference control
+  # (frontend can round further based on user's Number Precision setting)
   zscores <- rep(NA, length(result$y))
   zscores[(leading_NA + 1):(leading_NA + length(observed_clean))] <-
-    round(residuals / residual_sd, 2)
+    round(residuals / residual_sd, 3)
   zscores[(leading_NA + length(observed_clean) + 1):length(zscores)] <-
     rep(0, h)
 
@@ -240,7 +240,7 @@ handleCumulativeForecast <- function(y, h, t) {
   residual_sd <- sd(residuals, na.rm = TRUE)
 
   # Z-scores for observed data
-  zscores_obs <- round(residuals / residual_sd, 2)
+  zscores_obs <- round(residuals / residual_sd, 3)
 
   # For forecast period, z-scores are 0 (no deviation from model)
   zscores_fc <- rep(0, h)

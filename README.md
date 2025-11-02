@@ -120,7 +120,7 @@ curl "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=lin_reg&t=1
 - `y`: Fitted baseline values (for historical period) + forecast values (for future period). Rounded to 1 decimal place.
 - `lower`: 95% prediction interval lower bound (only for forecast period). Rounded to 1 decimal place.
 - `upper`: 95% prediction interval upper bound (only for forecast period). Rounded to 1 decimal place.
-- `zscore`: Standardized residuals showing how many standard deviations each observed value is from the fitted baseline. Rounded to 2 decimal places for statistical precision (e.g., ±1.96 significance threshold). Values beyond ±2 are statistically significant. Forecast period values are 0 (by definition).
+- `zscore`: Standardized residuals showing how many standard deviations each observed value is from the fitted baseline. Rounded to 3 decimal places to match frontend's maximum precision setting. Values beyond ±2 are statistically significant (95% CI). Forecast period values are 0 (by definition).
 
 #### `GET /cum`
 
