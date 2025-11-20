@@ -280,16 +280,17 @@ app$on("request", function(server, request, ...) {
   y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
   h <- as.integer(request$query$h %||% 1)
   t <- as.integer(request$query$t %||% 0) == 1
+  b <- if (!is.null(request$query$b)) as.integer(request$query$b) else NULL
 
   # Process request with error handling
   res <- tryCatch({
     if (request$path == "/") {
       m <- request$query$m
       s <- as.integer(request$query$s)
-      handleForecast(y, h, m, s, t)
+      handleForecast(y, h, m, s, t, b)
     } else {
       # request$path == "/cum" (already validated above)
-      handleCumulativeForecast(y, h, t)
+      handleCumulativeForecast(y, h, t, b)
     }
   }, error = function(e) {
     log_message("ERROR", "Processing failed", list(
