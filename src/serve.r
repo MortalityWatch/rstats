@@ -20,6 +20,10 @@ init_sentry()
 port <- ifelse(Sys.getenv("PORT") != "", Sys.getenv("PORT"), "5000")
 app <- Fire$new(host = "0.0.0.0", port = as.integer(port))
 
+# CORS configuration
+allowed_origins_env <- Sys.getenv("ALLOWED_ORIGINS", "https://www.mortality.watch,https://mortality.watch,http://localhost:3000")
+allowed_origins <- strsplit(allowed_origins_env, ",")[[1]]
+
 # Rate limiting state
 rate_limit_store <- new.env()
 RATE_LIMIT_WINDOW <- as.integer(Sys.getenv("RATE_LIMIT_WINDOW", "60")) # seconds
@@ -195,6 +199,15 @@ send_error <- function(server, request, status, message) {
   response$body <- jsonlite::toJSON(list(error = message, status = status), auto_unbox = TRUE)
   response$status <- status
   response$type <- "json"
+
+  # Set CORS headers for error responses
+  origin <- request$headers$origin %||% request$headers$Origin
+  if (!is.null(origin) && origin %in% allowed_origins) {
+    response$set_header("Access-Control-Allow-Origin", origin)
+    response$set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    response$set_header("Access-Control-Allow-Headers", "Content-Type")
+  }
+
   return(response)
 }
 
@@ -227,6 +240,14 @@ app$on("request", function(server, request, ...) {
     ), auto_unbox = TRUE)
     response$status <- 200L
     response$type <- "json"
+
+    # Set CORS headers
+    origin <- request$headers$origin %||% request$headers$Origin
+    if (!is.null(origin) && origin %in% allowed_origins) {
+      response$set_header("Access-Control-Allow-Origin", origin)
+      response$set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+      response$set_header("Access-Control-Allow-Headers", "Content-Type")
+    }
 
     log_message("INFO", "Health check", list(status = "ok"))
     return(response)
@@ -273,6 +294,15 @@ app$on("request", function(server, request, ...) {
     response$status <- 200L
     response$type <- "json"
     response$set_header("X-Cache", "HIT")
+
+    # Set CORS headers for cached responses
+    origin <- request$headers$origin %||% request$headers$Origin
+    if (!is.null(origin) && origin %in% allowed_origins) {
+      response$set_header("Access-Control-Allow-Origin", origin)
+      response$set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+      response$set_header("Access-Control-Allow-Headers", "Content-Type")
+    }
+
     return(response)
   }
 
@@ -330,6 +360,14 @@ app$on("request", function(server, request, ...) {
   response$status <- 200L
   response$type <- "json"
   response$set_header("X-Cache", "MISS")
+
+  # Set CORS headers
+  origin <- request$headers$origin %||% request$headers$Origin
+  if (!is.null(origin) && origin %in% allowed_origins) {
+    response$set_header("Access-Control-Allow-Origin", origin)
+    response$set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    response$set_header("Access-Control-Allow-Headers", "Content-Type")
+  }
 
   # Log completion
   duration_ms <- round(as.numeric(difftime(Sys.time(), start_time, units = "secs")) * 1000, 2)
