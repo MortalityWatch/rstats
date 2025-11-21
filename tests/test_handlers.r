@@ -1,5 +1,9 @@
 # Unit tests for handler functions
 library(testthat)
+library(tibble)
+library(fable)
+library(tidyverse)
+library(tsibble)
 
 # Source required files
 source("../src/utils.r")
@@ -237,19 +241,10 @@ test_that("baseline_length NULL uses all data (backwards compatible)", {
   expect_equal(result_with_null$zscore, result_without$zscore)
 })
 
-test_that("baseline_length >= length(y) uses all data", {
-  y <- c(100, 105, 110, 108, 112)
-  h <- 2
-  m <- "mean"
-  s <- 1
-  t <- FALSE
-
-  result_full <- handleForecast(y, h, m, s, t, baseline_length = NULL)
-  result_oversized <- handleForecast(y, h, m, s, t, baseline_length = 10)
-
-  # Should behave the same
-  expect_equal(result_full$y, result_oversized$y)
-  expect_equal(result_full$zscore, result_oversized$zscore)
+test_that("baseline_length validation in integration test", {
+  # This test is now covered by validation tests below
+  # baseline_length >= length(y) should throw an error
+  expect_true(TRUE)
 })
 
 test_that("baseline_length works with different methods", {
@@ -377,6 +372,117 @@ test_that("Forecast values are rounded to 1 decimal", {
       }
     }
   }
+})
+
+# ============================================================================
+# Validation tests for baseline_length parameter
+# ============================================================================
+
+test_that("handleForecast rejects baseline_length = 0", {
+  y <- c(100, 105, 110, 115, 120)
+  h <- 2
+  m <- "mean"
+  s <- 1
+  t <- FALSE
+
+  expect_error(
+    handleForecast(y, h, m, s, t, baseline_length = 0),
+    "greater than 0"
+  )
+})
+
+test_that("handleForecast rejects negative baseline_length", {
+  y <- c(100, 105, 110, 115, 120)
+  h <- 2
+  m <- "mean"
+  s <- 1
+  t <- FALSE
+
+  expect_error(
+    handleForecast(y, h, m, s, t, baseline_length = -5),
+    "greater than 0"
+  )
+})
+
+test_that("handleForecast rejects baseline_length >= data length", {
+  y <- c(100, 105, 110, 115, 120)
+  h <- 2
+  m <- "mean"
+  s <- 1
+  t <- FALSE
+
+  expect_error(
+    handleForecast(y, h, m, s, t, baseline_length = 5),
+    "less than the data length"
+  )
+
+  expect_error(
+    handleForecast(y, h, m, s, t, baseline_length = 10),
+    "less than the data length"
+  )
+})
+
+test_that("handleForecast rejects baseline_length < 3", {
+  y <- c(100, 105, 110, 115, 120)
+  h <- 2
+  m <- "mean"
+  s <- 1
+  t <- FALSE
+
+  expect_error(
+    handleForecast(y, h, m, s, t, baseline_length = 2),
+    "at least 3"
+  )
+
+  expect_error(
+    handleForecast(y, h, m, s, t, baseline_length = 1),
+    "at least 3"
+  )
+})
+
+test_that("handleCumulativeForecast rejects invalid baseline_length", {
+  y <- c(1000, 2100, 3300, 4600, 6000)
+  h <- 2
+  t <- TRUE
+
+  # Test 0
+  expect_error(
+    handleCumulativeForecast(y, h, t, baseline_length = 0),
+    "greater than 0"
+  )
+
+  # Test negative
+  expect_error(
+    handleCumulativeForecast(y, h, t, baseline_length = -3),
+    "greater than 0"
+  )
+
+  # Test >= length
+  expect_error(
+    handleCumulativeForecast(y, h, t, baseline_length = 5),
+    "less than the data length"
+  )
+
+  # Test < 3
+  expect_error(
+    handleCumulativeForecast(y, h, t, baseline_length = 2),
+    "at least 3"
+  )
+})
+
+test_that("validate_baseline_length function works correctly", {
+  # Valid cases - should not throw errors
+  expect_silent(validate_baseline_length(NULL, 10))
+  expect_silent(validate_baseline_length(5, 10))
+  expect_silent(validate_baseline_length(3, 10))
+
+  # Invalid cases - should throw errors
+  expect_error(validate_baseline_length(0, 10), "greater than 0")
+  expect_error(validate_baseline_length(-5, 10), "greater than 0")
+  expect_error(validate_baseline_length(10, 10), "less than the data length")
+  expect_error(validate_baseline_length(15, 10), "less than the data length")
+  expect_error(validate_baseline_length(2, 10), "at least 3")
+  expect_error(validate_baseline_length(1, 10), "at least 3")
 })
 
 message("\nHandler tests completed!")
