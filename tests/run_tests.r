@@ -14,4 +14,8 @@ test_file("test_utils.r", reporter = "progress")
 cat("\n=== Testing validation and caching ===\n")
 test_file("test_validation.r", reporter = "progress")
 
+# Test handler functions
+cat("\n=== Testing forecast handlers ===\n")
+test_file("test_handlers.r", reporter = "progress")
+
 cat("\n✓ All tests completed\n")

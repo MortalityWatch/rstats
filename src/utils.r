@@ -162,8 +162,8 @@ agg_pred <- function(w, predObject, alpha = 0.95) {
 #' @param cumulative_vector Vector of cumulative values
 #' @return Vector of incremental (uncumulated) values
 uncumulate <- function(cumulative_vector) {
-  # Check if the vector is empty
-  if (length(cumulative_vector) == 0) {
+  # Check if the vector is empty or single value
+  if (length(cumulative_vector) <= 1) {
     return(cumulative_vector)
   }
 
