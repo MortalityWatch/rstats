@@ -46,7 +46,14 @@
       "Bash(done)",
       "Bash(do if curl -s http://localhost:5010/health)",
       "Bash(export PORT=5010)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(git stash:*)",
+      "Bash(kill:*)",
+      "Bash(do)",
+      "Bash(if curl -s http://localhost:5000/health)",
+      "Bash(then)",
+      "Bash(timeout 10 Rscript:*)"
     ],
     "deny": [],
     "ask": []

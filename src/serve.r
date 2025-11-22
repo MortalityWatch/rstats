@@ -9,9 +9,25 @@ library(fiery)
 library(tsibble)
 
 # Load utility functions and handlers
-source("utils.r")
-source("handlers.r")
-source("sentry.r")
+# Find the src directory
+if (file.exists("utils.r")) {
+  # Running from src/ directory
+  source("utils.r")
+  source("handlers.r")
+  source("sentry.r")
+} else if (file.exists("src/utils.r")) {
+  # Running from project root
+  source("src/utils.r")
+  source("src/handlers.r")
+  source("src/sentry.r")
+} else if (file.exists("../src/utils.r")) {
+  # Being sourced from tests/
+  source("../src/utils.r")
+  source("../src/handlers.r")
+  source("../src/sentry.r")
+} else {
+  stop("Cannot find utils.r - make sure you're running from the correct directory")
+}
 
 # Initialize Sentry error tracking
 init_sentry()
@@ -152,6 +168,40 @@ validate_request <- function(query, path) {
     return(list(valid = FALSE, status = 400, message = "Parameter 'y' exceeds maximum length of 10000"))
   }
 
+  # Validate 'b' (baseline_length) if provided
+  if (!is.null(query$b)) {
+    b <- tryCatch(as.integer(query$b), error = function(e) NA)
+    if (is.na(b)) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be an integer"))
+    }
+    if (b <= 0) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be greater than 0"))
+    }
+    if (b >= length(y)) {
+      msg <- paste0(
+        "Parameter 'b' (", b, ") must be less than the data length (", length(y), ")"
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
+    }
+    if (b < 3) {
+      return(list(
+        valid = FALSE,
+        status = 400,
+        message = "Parameter 'b' must be at least 3 to calculate meaningful statistics"
+      ))
+    }
+    # Validate that baseline period has sufficient non-NA values
+    baseline_data <- y[1:b]
+    non_na_count <- sum(!is.na(baseline_data))
+    if (non_na_count < 3) {
+      msg <- paste0(
+        "Baseline period (first ", b, " values) contains only ", non_na_count,
+        " non-NA values. At least 3 non-NA values are required."
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
+    }
+  }
+
   # Validate 'h' (horizon)
   h <- as.integer(query$h %||% 1)
   if (is.na(h) || h < 1 || h > 1000) {
@@ -280,16 +330,17 @@ app$on("request", function(server, request, ...) {
   y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
   h <- as.integer(request$query$h %||% 1)
   t <- as.integer(request$query$t %||% 0) == 1
+  b <- if (!is.null(request$query$b)) as.integer(request$query$b) else NULL
 
   # Process request with error handling
   res <- tryCatch({
     if (request$path == "/") {
       m <- request$query$m
       s <- as.integer(request$query$s)
-      handleForecast(y, h, m, s, t)
+      handleForecast(y, h, m, s, t, b)
     } else {
       # request$path == "/cum" (already validated above)
-      handleCumulativeForecast(y, h, t)
+      handleCumulativeForecast(y, h, t, b)
     }
   }, error = function(e) {
     log_message("ERROR", "Processing failed", list(

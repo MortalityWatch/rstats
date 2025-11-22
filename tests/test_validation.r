@@ -48,7 +48,7 @@ test_that("validate_request rejects non-numeric y parameter", {
 
   expect_false(result$valid)
   expect_equal(result$status, 400)
-  expect_match(result$message, "comma-separated numeric values")
+  expect_match(result$message, "at least 3 valid data points")
 })
 
 test_that("validate_request rejects insufficient data points", {
@@ -108,7 +108,7 @@ test_that("validate_request rejects invalid method", {
 
   expect_false(result$valid)
   expect_equal(result$status, 400)
-  expect_match(result$message, "naive, mean, lin_reg, exp")
+  expect_match(result$message, "naive, mean, median, lin_reg, exp")
 })
 
 test_that("generate_cache_key creates consistent keys", {
@@ -200,6 +200,3 @@ test_that("rate limiting resets after window expires", {
   # Verify count was reset
   expect_equal(rate_limit_store[[ip]]$count, 1)
 })
-
-# Run all tests
-test_dir(".")

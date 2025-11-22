@@ -19,16 +19,19 @@ is_server_running <- function() {
   })
 }
 
-# Skip all tests if server is not running
-if (!is_server_running()) {
-  message("Server is not running at ", BASE_URL)
-  message("To run integration tests, start the server first:")
-  message("  Rscript src/serve.r")
-  message("Or set TEST_BASE_URL environment variable to point to a running instance.")
-  quit(save = "no", status = 0)
+# Check if server is running and skip all tests if not
+skip_if_no_server <- function() {
+  if (!is_server_running()) {
+    skip(paste0(
+      "Server is not running at ", BASE_URL, ". ",
+      "To run integration tests, start the server first: Rscript src/serve.r"
+    ))
+  }
 }
 
 test_that("Health endpoint returns correct structure", {
+  skip_if_no_server()
+
   response <- GET(paste0(BASE_URL, "/health"))
 
   expect_equal(status_code(response), 200)
@@ -77,8 +80,6 @@ test_that("Forecast endpoint with trend parameter", {
 })
 
 test_that("Cumulative forecast endpoint works", {
-  skip("TODO: Fix cumulative forecast bug - returns 4 values instead of 6")
-
   response <- GET(paste0(BASE_URL, "/cum"), query = list(
     y = "1000,2100,3300,4600",
     h = 2,
@@ -243,6 +244,205 @@ test_that("Naive forecast method works", {
 
   body <- content(response, as = "parsed")
   expect_equal(length(body$y), 8) # 5 original + 3 forecast
+})
+
+test_that("Baseline length parameter 'b' works for standard forecast", {
+  # 10 years of data, use first 5 as baseline
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,108,112,115,120,125,130,135",
+    h = 2,
+    s = 1,
+    m = "mean",
+    t = 0,
+    b = 5
+  ))
+
+  expect_equal(status_code(response), 200)
+
+  body <- content(response, as = "parsed")
+  expect_equal(length(body$y), 12) # 10 original + 2 forecast
+  expect_equal(length(body$zscore), 12)
+
+  # Z-scores should exist for all observed data (indices 1-10)
+  expect_true(!is.na(body$zscore[[1]]))
+  expect_true(!is.na(body$zscore[[5]])) # Last baseline point
+  expect_true(!is.na(body$zscore[[6]])) # First post-baseline point
+  expect_true(!is.na(body$zscore[[10]])) # Last observed point
+
+  # Forecast z-scores should be 0
+  expect_equal(body$zscore[[11]], 0)
+  expect_equal(body$zscore[[12]], 0)
+})
+
+test_that("Baseline length parameter 'b' works for cumulative forecast", {
+  # 6 years of data, use first 4 as baseline
+  response <- GET(paste0(BASE_URL, "/cum"), query = list(
+    y = "1000,2100,3300,4600,6000,7500",
+    h = 2,
+    t = 1,
+    b = 4
+  ))
+
+  expect_equal(status_code(response), 200)
+
+  body <- content(response, as = "parsed")
+  # Should have baseline (4) + post-baseline (2) + forecast (2) = 8 values
+  expect_equal(length(body$y), 8)
+  expect_equal(length(body$zscore), 8)
+
+  # Z-scores should exist for all observed data
+  expect_true(!is.na(body$zscore[[1]]))
+  expect_true(!is.na(body$zscore[[6]])) # Last observed point
+
+  # Forecast z-scores should be 0
+  expect_equal(body$zscore[[7]], 0)
+  expect_equal(body$zscore[[8]], 0)
+})
+
+test_that("Baseline length 'b' with different methods works", {
+  # Test with linear regression
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120,125,130,135",
+    h = 2,
+    s = 1,
+    m = "lin_reg",
+    t = 1,
+    b = 5
+  ))
+  expect_equal(status_code(response), 200)
+
+  # Test with median
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,108,112,115,120,125",
+    h = 2,
+    s = 1,
+    m = "median",
+    t = 0,
+    b = 5
+  ))
+  expect_equal(status_code(response), 200)
+
+  # Test with exponential smoothing
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120,125,130,135",
+    h = 2,
+    s = 1,
+    m = "exp",
+    t = 1,
+    b = 5
+  ))
+  expect_equal(status_code(response), 200)
+})
+
+test_that("Invalid baseline length 'b' returns 400 - too small", {
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 2
+  ))
+
+  expect_equal(status_code(response), 400)
+  body <- content(response, as = "parsed")
+  expect_true("error" %in% names(body))
+  expect_match(body$error, "at least 3")
+})
+
+test_that("Invalid baseline length 'b' returns 400 - zero or negative", {
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 0
+  ))
+
+  expect_equal(status_code(response), 400)
+  body <- content(response, as = "parsed")
+  expect_true("error" %in% names(body))
+  expect_match(body$error, "greater than 0")
+
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = -5
+  ))
+
+  expect_equal(status_code(response), 400)
+})
+
+test_that("Invalid baseline length 'b' returns 400 - greater than or equal to data length", {
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 5
+  ))
+
+  expect_equal(status_code(response), 400)
+  body <- content(response, as = "parsed")
+  expect_true("error" %in% names(body))
+  expect_match(body$error, "less than the data length")
+
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 10
+  ))
+
+  expect_equal(status_code(response), 400)
+})
+
+test_that("Omitting 'b' parameter uses all data (backwards compatible)", {
+  # Test without 'b' parameter
+  response_without_b <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,105,110,115,120",
+    h = 2,
+    s = 1,
+    m = "mean",
+    t = 0
+  ))
+
+  expect_equal(status_code(response_without_b), 200)
+
+  body <- content(response_without_b, as = "parsed")
+  expect_equal(length(body$y), 7)
+  expect_equal(length(body$zscore), 7)
+})
+
+test_that("Baseline with insufficient non-NA values returns 400", {
+  # Baseline period has only NAs
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "NA,NA,NA,100,105,110",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 3
+  ))
+
+  expect_equal(status_code(response), 400)
+  body <- content(response, as = "parsed")
+  expect_true("error" %in% names(body))
+  expect_match(body$error, "non-NA values")
+
+  # Baseline period has only 2 non-NA values (need 3)
+  response2 <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,NA,105,NA,110,115",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 3
+  ))
+
+  expect_equal(status_code(response2), 400)
+  body2 <- content(response2, as = "parsed")
+  expect_match(body2$error, "only 2 non-NA values")
 })
 
 message("\nIntegration tests completed successfully!")

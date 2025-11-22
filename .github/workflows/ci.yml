@@ -15,11 +15,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: '4.3.2'
-          use-public-rspm: true
+      - name: Setup R with r2u (fast binary packages)
+        uses: eddelbuettel/github-actions/r2u-setup@master
 
       - name: Install system dependencies
         run: |
@@ -29,14 +26,14 @@ jobs:
       - name: Cache R packages
         uses: actions/cache@v3
         with:
-          path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('dependencies_r.txt') }}
+          path: /usr/local/lib/R/site-library
+          key: ${{ runner.os }}-r2u-${{ hashFiles('dependencies_r.txt') }}
           restore-keys: |
-            ${{ runner.os }}-r-
+            ${{ runner.os }}-r2u-
 
-      - name: Install R dependencies
+      - name: Install R dependencies (binary packages via r2u)
         run: |
-          # Install tidyverse dependencies individually to avoid memory issues
+          # r2u provides pre-compiled binaries - much faster than source compilation
           install.packages(c(
             "tibble",
             "dplyr",
@@ -50,7 +47,7 @@ jobs:
             "httr",
             "jsonlite",
             "uuid"
-          ), repos = "https://cloud.r-project.org/", Ncpus = 2)
+          ))
         shell: Rscript {0}
 
       - name: Run unit tests
@@ -113,13 +110,18 @@ jobs:
           echo "=== Testing forecast endpoint ==="
           curl -v "http://localhost:5000/?y=100,105,110,108,112,115,120&h=3&s=1&m=mean&t=0" || exit 1
 
-      - name: Setup R for integration tests
-        uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: '4.3.2'
-          use-public-rspm: true
+      - name: Setup R with r2u for integration tests
+        uses: eddelbuettel/github-actions/r2u-setup@master
 
-      - name: Install R test dependencies
+      - name: Cache R test packages
+        uses: actions/cache@v3
+        with:
+          path: /usr/local/lib/R/site-library
+          key: ${{ runner.os }}-r2u-test-deps
+          restore-keys: |
+            ${{ runner.os }}-r2u-
+
+      - name: Install R test dependencies (binary via r2u)
         run: install.packages(c("testthat", "httr", "jsonlite"))
         shell: Rscript {0}
 
@@ -136,28 +138,26 @@ jobs:
 
   lint:
     name: Lint and Format Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: '4.3.2'
-          use-public-rspm: true
+      - name: Setup R with r2u
+        uses: eddelbuettel/github-actions/r2u-setup@master
 
       - name: Cache R packages
         uses: actions/cache@v3
         with:
-          path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-lint-4.3.2
+          path: /usr/local/lib/R/site-library
+          key: ${{ runner.os }}-r2u-lintr-${{ hashFiles('dependencies_r.txt') }}
           restore-keys: |
-            ${{ runner.os }}-r-lint-
+            ${{ runner.os }}-r2u-lintr-
+            ${{ runner.os }}-r2u-
 
-      - name: Install lintr
-        run: install.packages("lintr", repos = "https://cloud.r-project.org/")
+      - name: Install lintr (binary via r2u)
+        run: install.packages("lintr")
         shell: Rscript {0}
 
       - name: Lint R code
