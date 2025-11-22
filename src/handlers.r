@@ -153,29 +153,37 @@ handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
 
   # Post-baseline observed data z-scores
   # Generate fitted values for post-baseline period using the baseline model
-  n_post_baseline_values <- 0
+  n_post_baseline_total <- 0  # Total including NAs
   if (baseline_length < length(y_full)) {
     post_baseline_data <- y_full[(baseline_length + 1):length(y_full)]
+    n_post_baseline_total <- length(post_baseline_data)
 
-    # Generate fitted values for post-baseline period using baseline model
-    # Use forecast() to get predictions for post-baseline period
-    post_baseline_clean <- post_baseline_data[!is.na(post_baseline_data)]
-    n_post_baseline_values <- length(post_baseline_clean)
+    # Track which positions have non-NA values for correct z-score alignment
+    post_baseline_non_na_idx <- which(!is.na(post_baseline_data))
+    post_baseline_clean <- post_baseline_data[post_baseline_non_na_idx]
 
-    if (n_post_baseline_values > 0) {
-      fc_post <- mdl |> forecast(h = n_post_baseline_values)
+    if (length(post_baseline_clean) > 0) {
+      # Generate fitted values for post-baseline period using baseline model
+      # Use forecast() to get predictions for post-baseline period
+      fc_post <- mdl |> forecast(h = length(post_baseline_clean))
       post_baseline_fitted <- as_tibble(fc_post) |> pull(.mean)
 
       # Calculate z-scores for post-baseline
       post_baseline_residuals <- post_baseline_clean - post_baseline_fitted
       post_baseline_zscores <- post_baseline_residuals / residual_sd
-      zscores[(leading_NA + n_baseline_values + 1):(leading_NA + n_baseline_values + n_post_baseline_values)] <-
-        round(post_baseline_zscores, 3)
+
+      # Assign z-scores to correct positions (accounting for interspersed NAs)
+      post_baseline_start <- leading_NA + n_baseline_values
+      for (i in seq_along(post_baseline_non_na_idx)) {
+        zscores[post_baseline_start + post_baseline_non_na_idx[i]] <-
+          round(post_baseline_zscores[i], 3)
+      }
     }
   }
 
   # Forecast period z-scores are 0 (by definition)
-  forecast_start <- leading_NA + n_baseline_values + n_post_baseline_values + 1
+  # Use total post-baseline length (including NAs) for correct offset
+  forecast_start <- leading_NA + n_baseline_values + n_post_baseline_total + 1
   zscores[forecast_start:length(zscores)] <- rep(0, h)
 
   list(y = result$y, lower = result$lower, upper = result$upper, zscore = zscores)

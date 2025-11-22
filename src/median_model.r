@@ -117,13 +117,18 @@ forecast.model_median <- function(object, new_data, specials = NULL, ...) {
     # Determine which season each forecast point belongs to
     forecast_seasons <- ((n_obs + seq_len(h) - 1) %% period) + 1
 
-    # Get median for each forecast season
+    # Get median and sd for each forecast season
     fc_medians <- sapply(forecast_seasons, function(s) {
       object$seasonal_medians[[s]]$median
     })
 
-    # Return distributions for each forecast point
-    distributional::dist_normal(fc_medians, object$sigma)
+    # Use per-season standard deviation for more accurate confidence intervals
+    fc_sds <- sapply(forecast_seasons, function(s) {
+      object$seasonal_medians[[s]]$sd
+    })
+
+    # Return distributions for each forecast point with per-season uncertainty
+    distributional::dist_normal(fc_medians, fc_sds)
   } else {
     # Non-seasonal forecast: constant median
     distributional::dist_normal(object$median, object$sigma)[rep(1, h)]

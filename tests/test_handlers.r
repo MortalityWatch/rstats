@@ -267,6 +267,33 @@ test_that("baseline_length works with different methods", {
   check_forecast_result(result_med, length(y) + h)
 })
 
+test_that("baseline_length handles interspersed NAs in post-baseline period", {
+  # Create data with baseline period and post-baseline with interspersed NAs
+  y <- c(100, 105, 110, 108, 112, 115, NA, 120, NA, 125)
+  baseline_length <- 5
+  h <- 2
+  m <- "mean"
+  s <- 1
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t, baseline_length)
+
+  check_forecast_result(result, length(y) + h)
+
+  # Z-scores should be NA at positions 7 and 9 (where data is NA)
+  expect_true(is.na(result$zscore[7]))
+  expect_true(is.na(result$zscore[9]))
+
+  # Z-scores should be calculated for non-NA positions 6, 8, 10
+  expect_true(!is.na(result$zscore[6]))  # Value 115
+  expect_true(!is.na(result$zscore[8]))  # Value 120
+  expect_true(!is.na(result$zscore[10])) # Value 125
+
+  # Forecast z-scores should still be 0
+  expect_equal(result$zscore[11], 0)
+  expect_equal(result$zscore[12], 0)
+})
+
 # ============================================================================
 # handleCumulativeForecast() tests
 # ============================================================================
