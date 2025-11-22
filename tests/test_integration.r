@@ -77,8 +77,6 @@ test_that("Forecast endpoint with trend parameter", {
 })
 
 test_that("Cumulative forecast endpoint works", {
-  skip("TODO: Fix cumulative forecast bug - returns 4 values instead of 6")
-
   response <- GET(paste0(BASE_URL, "/cum"), query = list(
     y = "1000,2100,3300,4600",
     h = 2,

@@ -44,8 +44,11 @@ train_median <- function(.data, specials, ...) {
   if (has_season) {
     # Seasonal median: calculate median for each season
     # Determine season period from the time series
+    # (e.g., 4 for quarterly, 12 for monthly, 52 for weekly)
+    # Note: When called from API with s > 1, the time index is
+    # always yearquarter/yearmonth/yearweek, so period will be
+    # 4, 12, or 52 respectively (never 1)
     period <- get_frequencies(NULL, .data, .auto = "smallest")
-    if (period == 1) period <- 4  # Default to quarterly if annual
 
     # Calculate seasonal medians
     season_idx <- seq_len(n) %% period

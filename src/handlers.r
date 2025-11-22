@@ -2,7 +2,8 @@
 # Functions for handling forecast and cumulative forecast requests
 
 # Load custom MEDIAN model
-# Try multiple paths to support different execution contexts (main app, tests, etc.)
+# Try multiple paths to support different execution contexts
+# (main app, tests, etc.)
 median_model_paths <- c(
   "src/median_model.r",          # Running from project root
   "median_model.r",              # Running from src/
@@ -19,7 +20,8 @@ for (path in median_model_paths) {
 }
 
 if (!median_model_loaded) {
-  stop("Could not find median_model.r. Tried paths: ", paste(median_model_paths, collapse = ", "))
+  stop("Could not find median_model.r. Tried paths: ",
+       paste(median_model_paths, collapse = ", "))
 }
 
 #' Handle standard forecast request
@@ -154,19 +156,6 @@ handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
   n_post_baseline_values <- 0
   if (baseline_length < length(y_full)) {
     post_baseline_data <- y_full[(baseline_length + 1):length(y_full)]
-    n_post_baseline <- length(post_baseline_data)
-
-    # Create a tsibble for post-baseline period with appropriate time index
-    post_baseline_years <- seq.int(baseline_length + 1, length(y_full))
-    if (s == 2) {
-      post_baseline_index <- make_yearquarter(2000, 1) + (baseline_length:(length(y_full) - 1))
-    } else if (s == 3) {
-      post_baseline_index <- make_yearmonth(2000, 1) + (baseline_length:(length(y_full) - 1))
-    } else if (s == 4) {
-      post_baseline_index <- make_yearweek(2000, 1) + (baseline_length:(length(y_full) - 1))
-    } else {
-      post_baseline_index <- post_baseline_years
-    }
 
     # Generate fitted values for post-baseline period using baseline model
     # Use forecast() to get predictions for post-baseline period
