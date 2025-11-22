@@ -1,35 +1,6 @@
 # Request Handlers
 # Functions for handling forecast and cumulative forecast requests
 
-#' Validate baseline_length parameter
-#'
-#' @param baseline_length Integer or NULL
-#' @param y_length Length of the full dataset
-#' @return NULL if valid, throws error otherwise
-validate_baseline_length <- function(baseline_length, y_length) {
-  if (is.null(baseline_length)) {
-    return(NULL)
-  }
-
-  if (!is.numeric(baseline_length) || length(baseline_length) != 1) {
-    stop("baseline_length must be a single integer value or NULL")
-  }
-
-  if (baseline_length <= 0) {
-    stop("baseline_length must be greater than 0")
-  }
-
-  if (baseline_length >= y_length) {
-    stop(paste0("baseline_length (", baseline_length, ") must be less than the data length (", y_length, ")"))
-  }
-
-  if (baseline_length < 3) {
-    stop("baseline_length must be at least 3 to calculate meaningful statistics")
-  }
-
-  NULL
-}
-
 # Load custom MEDIAN model
 # Try multiple paths to support different execution contexts (main app, tests, etc.)
 median_model_paths <- c(
@@ -63,9 +34,6 @@ if (!median_model_loaded) {
 #' @param baseline_length Integer number of data points in baseline period (default: use all data)
 #' @return List with y (fitted + forecast), lower, and upper bounds
 handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
-  # Validate baseline_length parameter
-  validate_baseline_length(baseline_length, length(y))
-
   # If baseline_length is specified, split the data
   # Use first baseline_length points for fitting, but calculate z-scores for all observed data
   y_full <- y
@@ -205,8 +173,9 @@ handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
       as_tsibble(index = year)
 
     # Generate fitted values for post-baseline period using baseline model
+    df_post_clean <- df_post |> filter(!is.na(asmr))
     post_baseline_fitted <- mdl |>
-      augment(new_data = df_post |> filter(!is.na(asmr))) |>
+      augment(new_data = df_post_clean) |>
       pull(.fitted)
 
     # Calculate z-scores for post-baseline (only for non-NA values)
@@ -260,9 +229,6 @@ cumForecastN <- function(df_train, df_test, mdl) {
 #' @param baseline_length Integer number of data points in baseline period (default: use all data)
 #' @return List with y (fitted + forecast), lower, and upper bounds
 handleCumulativeForecast <- function(y, h, t, baseline_length = NULL) {
-  # Validate baseline_length parameter
-  validate_baseline_length(baseline_length, length(y))
-
   y_full <- y
 
   # If baseline_length is specified, use only that portion for fitting

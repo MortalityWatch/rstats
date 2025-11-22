@@ -152,6 +152,23 @@ validate_request <- function(query, path) {
     return(list(valid = FALSE, status = 400, message = "Parameter 'y' exceeds maximum length of 10000"))
   }
 
+  # Validate 'b' (baseline_length) if provided
+  if (!is.null(query$b)) {
+    b <- tryCatch(as.integer(query$b), error = function(e) NA)
+    if (is.na(b)) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be an integer"))
+    }
+    if (b <= 0) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be greater than 0"))
+    }
+    if (b >= length(y)) {
+      return(list(valid = FALSE, status = 400, message = paste0("Parameter 'b' (", b, ") must be less than the data length (", length(y), ")")))
+    }
+    if (b < 3) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be at least 3 to calculate meaningful statistics"))
+    }
+  }
+
   # Validate 'h' (horizon)
   h <- as.integer(query$h %||% 1)
   if (is.na(h) || h < 1 || h > 1000) {
