@@ -159,30 +159,25 @@ handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
     # Create a tsibble for post-baseline period with appropriate time index
     post_baseline_years <- seq.int(baseline_length + 1, length(y_full))
     if (s == 2) {
-      post_baseline_index <- make_yearquarter(2000, 1) + (baseline_length:length(y_full) - 1)
+      post_baseline_index <- make_yearquarter(2000, 1) + (baseline_length:(length(y_full) - 1))
     } else if (s == 3) {
-      post_baseline_index <- make_yearmonth(2000, 1) + (baseline_length:length(y_full) - 1)
+      post_baseline_index <- make_yearmonth(2000, 1) + (baseline_length:(length(y_full) - 1))
     } else if (s == 4) {
-      post_baseline_index <- make_yearweek(2000, 1) + (baseline_length:length(y_full) - 1)
+      post_baseline_index <- make_yearweek(2000, 1) + (baseline_length:(length(y_full) - 1))
     } else {
       post_baseline_index <- post_baseline_years
     }
 
-    # Create new_data for post-baseline period
-    df_post <- tibble(year = post_baseline_index, asmr = post_baseline_data) |>
-      as_tsibble(index = year)
-
     # Generate fitted values for post-baseline period using baseline model
-    df_post_clean <- df_post |> filter(!is.na(asmr))
-    post_baseline_fitted <- mdl |>
-      augment(new_data = df_post_clean) |>
-      pull(.fitted)
-
-    # Calculate z-scores for post-baseline (only for non-NA values)
+    # Use forecast() to get predictions for post-baseline period
     post_baseline_clean <- post_baseline_data[!is.na(post_baseline_data)]
     n_post_baseline_values <- length(post_baseline_clean)
 
     if (n_post_baseline_values > 0) {
+      fc_post <- mdl |> forecast(h = n_post_baseline_values)
+      post_baseline_fitted <- as_tibble(fc_post) |> pull(.mean)
+
+      # Calculate z-scores for post-baseline
       post_baseline_residuals <- post_baseline_clean - post_baseline_fitted
       post_baseline_zscores <- post_baseline_residuals / residual_sd
       zscores[(leading_NA + n_baseline_values + 1):(leading_NA + n_baseline_values + n_post_baseline_values)] <-
