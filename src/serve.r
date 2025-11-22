@@ -162,10 +162,17 @@ validate_request <- function(query, path) {
       return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be greater than 0"))
     }
     if (b >= length(y)) {
-      return(list(valid = FALSE, status = 400, message = paste0("Parameter 'b' (", b, ") must be less than the data length (", length(y), ")")))
+      msg <- paste0(
+        "Parameter 'b' (", b, ") must be less than the data length (", length(y), ")"
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
     }
     if (b < 3) {
-      return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be at least 3 to calculate meaningful statistics"))
+      return(list(
+        valid = FALSE,
+        status = 400,
+        message = "Parameter 'b' must be at least 3 to calculate meaningful statistics"
+      ))
     }
   }
 
