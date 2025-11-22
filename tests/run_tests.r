@@ -18,4 +18,5 @@ test_file("test_validation.r", reporter = "progress")
 cat("\n=== Testing forecast handlers ===\n")
 test_file("test_handlers.r", reporter = "progress")
 
-cat("\n✓ All tests completed\n")
+cat("\n✓ All unit tests completed\n")
+cat("\nNote: Integration tests can be run separately with a running server\n")

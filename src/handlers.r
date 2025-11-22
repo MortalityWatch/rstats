@@ -2,26 +2,93 @@
 # Functions for handling forecast and cumulative forecast requests
 
 # Load custom MEDIAN model
-# Try multiple paths to support different execution contexts
-# (main app, tests, etc.)
-median_model_paths <- c(
-  "src/median_model.r",          # Running from project root
-  "median_model.r",              # Running from src/
-  "../src/median_model.r"        # Running from tests/
-)
+# Use dirname to find path relative to this script
+handlers_dir <- if (exists("ofile") && !is.null(sys.frames()[[1]]$ofile)) {
+  dirname(sys.frames()[[1]]$ofile)
+} else {
+  # Fallback: try multiple paths for different execution contexts
+  paths <- c("src/median_model.r", "median_model.r", "../src/median_model.r")
+  found_path <- NULL
+  for (p in paths) {
+    if (file.exists(p)) {
+      found_path <- dirname(p)
+      break
+    }
+  }
+  if (is.null(found_path)) {
+    stop("Could not find median_model.r in any expected location")
+  }
+  found_path
+}
 
-median_model_loaded <- FALSE
-for (path in median_model_paths) {
-  if (file.exists(path)) {
-    source(path)
-    median_model_loaded <- TRUE
-    break
+median_model_path <- file.path(handlers_dir, "median_model.r")
+if (!file.exists(median_model_path)) {
+  # Final fallback: try relative paths
+  for (path in c("src/median_model.r", "median_model.r", "../src/median_model.r")) {
+    if (file.exists(path)) {
+      median_model_path <- path
+      break
+    }
   }
 }
 
-if (!median_model_loaded) {
-  stop("Could not find median_model.r. Tried paths: ",
-       paste(median_model_paths, collapse = ", "))
+if (!file.exists(median_model_path)) {
+  stop("Could not find median_model.r")
+}
+
+source(median_model_path)
+
+#' Calculate z-scores for baseline and post-baseline periods
+#'
+#' @param y_full Full dataset including both baseline and post-baseline
+#' @param baseline_length Length of baseline period
+#' @param baseline_residuals Residuals from baseline model fit
+#' @param mdl Fitted model object
+#' @param result_length Total length of result vector (includes forecast)
+#' @param leading_NA Number of leading NA values
+#' @param h Forecast horizon
+#' @return Vector of z-scores
+calculate_zscores <- function(y_full, baseline_length, baseline_residuals,
+                               mdl, result_length, leading_NA, h) {
+  residual_sd <- sd(baseline_residuals, na.rm = TRUE)
+  zscores <- rep(NA, result_length)
+
+  # Baseline period z-scores (from model residuals)
+  n_baseline_values <- length(baseline_residuals)
+  zscores[(leading_NA + 1):(leading_NA + n_baseline_values)] <-
+    round(baseline_residuals / residual_sd, 3)
+
+  # Post-baseline observed data z-scores
+  n_post_baseline_total <- 0
+  if (baseline_length < length(y_full)) {
+    post_baseline_data <- y_full[(baseline_length + 1):length(y_full)]
+    n_post_baseline_total <- length(post_baseline_data)
+
+    # Track which positions have non-NA values for correct z-score alignment
+    post_baseline_non_na_idx <- which(!is.na(post_baseline_data))
+    post_baseline_clean <- post_baseline_data[post_baseline_non_na_idx]
+
+    if (length(post_baseline_clean) > 0) {
+      # Generate fitted values for post-baseline period using baseline model
+      fc_post <- mdl |> forecast(h = length(post_baseline_clean))
+      post_baseline_fitted <- as_tibble(fc_post) |> pull(.mean)
+
+      # Calculate z-scores for post-baseline
+      post_baseline_residuals <- post_baseline_clean - post_baseline_fitted
+      post_baseline_zscores <- post_baseline_residuals / residual_sd
+
+      # Assign z-scores to correct positions (vectorized)
+      post_baseline_start <- leading_NA + n_baseline_values
+      zscore_indices <- post_baseline_start + post_baseline_non_na_idx
+      zscores[zscore_indices] <- round(post_baseline_zscores, 3)
+    }
+  }
+
+  # Forecast period z-scores are 0 (by definition)
+  forecast_start <- leading_NA + n_baseline_values + n_post_baseline_total + 1
+  zscores[forecast_start:length(zscores)] <- rep(0, h)
+
+  zscores
 }
 
 #' Handle standard forecast request
@@ -30,11 +97,26 @@ if (!median_model_loaded) {
 #'
 #' @param y Numeric vector of observed values (full dataset)
 #' @param h Integer horizon for forecasting
-#' @param m Character method: "naive", "mean", "lin_reg", "exp"
+#' @param m Character method: "naive", "mean", "lin_reg", "exp", "median"
 #' @param s Integer seasonality type: 1=year, 2=quarter, 3=month, 4=week
 #' @param t Boolean whether to include trend
 #' @param baseline_length Integer number of data points in baseline period (default: use all data)
-#' @return List with y (fitted + forecast), lower, and upper bounds
+#'
+#' @details
+#' Z-score Calculation:
+#' When baseline_length is specified, z-scores measure how much each observation
+#' deviates from what the baseline model predicts:
+#' - Baseline period: z = (observed - baseline_fitted) / baseline_sd
+#' - Post-baseline period: z = (observed - post_baseline_fitted) / baseline_sd
+#'   where post_baseline_fitted is the baseline model's prediction for that timepoint
+#' - Forecast period: z = 0 (by definition, no observed deviation)
+#'
+#' This means post-baseline z-scores measure deviation from the baseline model's
+#' prediction, NOT from the baseline period's mean. A high z-score in the post-baseline
+#' period indicates the observed value differs significantly from what the baseline
+#' model would have predicted.
+#'
+#' @return List with y (fitted + forecast), lower, and upper bounds, and zscore
 handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
   # If baseline_length is specified, split the data
   # Use first baseline_length points for fitting, but calculate z-scores for all observed data
@@ -135,56 +217,17 @@ handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
   ) |>
     mutate_if(is.numeric, round, 1)
 
-  # Calculate z-scores from standardized residuals
-  # Z-score formula: z = (observed - fitted) / sd(baseline_residuals)
-  # - Baseline period: Use residuals from model fit
-  # - Post-baseline period: Generate fitted values using baseline model, then calculate residuals
-  # - Forecast period: z = 0 (by definition, no deviation)
-
+  # Calculate z-scores using helper function
   baseline_residuals <- y_baseline[!is.na(y_baseline)] - bl$.mean
-  residual_sd <- sd(baseline_residuals, na.rm = TRUE)
-
-  zscores <- rep(NA, length(result$y))
-
-  # Baseline period z-scores (from model residuals)
-  n_baseline_values <- length(baseline_residuals)
-  zscores[(leading_NA + 1):(leading_NA + n_baseline_values)] <-
-    round(baseline_residuals / residual_sd, 3)
-
-  # Post-baseline observed data z-scores
-  # Generate fitted values for post-baseline period using the baseline model
-  n_post_baseline_total <- 0  # Total including NAs
-  if (baseline_length < length(y_full)) {
-    post_baseline_data <- y_full[(baseline_length + 1):length(y_full)]
-    n_post_baseline_total <- length(post_baseline_data)
-
-    # Track which positions have non-NA values for correct z-score alignment
-    post_baseline_non_na_idx <- which(!is.na(post_baseline_data))
-    post_baseline_clean <- post_baseline_data[post_baseline_non_na_idx]
-
-    if (length(post_baseline_clean) > 0) {
-      # Generate fitted values for post-baseline period using baseline model
-      # Use forecast() to get predictions for post-baseline period
-      fc_post <- mdl |> forecast(h = length(post_baseline_clean))
-      post_baseline_fitted <- as_tibble(fc_post) |> pull(.mean)
-
-      # Calculate z-scores for post-baseline
-      post_baseline_residuals <- post_baseline_clean - post_baseline_fitted
-      post_baseline_zscores <- post_baseline_residuals / residual_sd
-
-      # Assign z-scores to correct positions (accounting for interspersed NAs)
-      post_baseline_start <- leading_NA + n_baseline_values
-      for (i in seq_along(post_baseline_non_na_idx)) {
-        zscores[post_baseline_start + post_baseline_non_na_idx[i]] <-
-          round(post_baseline_zscores[i], 3)
-      }
-    }
-  }
-
-  # Forecast period z-scores are 0 (by definition)
-  # Use total post-baseline length (including NAs) for correct offset
-  forecast_start <- leading_NA + n_baseline_values + n_post_baseline_total + 1
-  zscores[forecast_start:length(zscores)] <- rep(0, h)
+  zscores <- calculate_zscores(
+    y_full = y_full,
+    baseline_length = baseline_length,
+    baseline_residuals = baseline_residuals,
+    mdl = mdl,
+    result_length = length(result$y),
+    leading_NA = leading_NA,
+    h = h
+  )
 
   list(y = result$y, lower = result$lower, upper = result$upper, zscore = zscores)
 }
@@ -219,7 +262,13 @@ cumForecastN <- function(df_train, df_test, mdl) {
 #' @param h Integer horizon for forecasting
 #' @param t Boolean whether to include trend
 #' @param baseline_length Integer number of data points in baseline period (default: use all data)
-#' @return List with y (fitted + forecast), lower, and upper bounds
+#'
+#' @details
+#' Z-score calculation follows the same semantics as handleForecast():
+#' measures deviation from the baseline model's prediction using baseline period's
+#' standard deviation. See handleForecast() documentation for details.
+#'
+#' @return List with y (fitted + forecast), lower, and upper bounds, and zscore
 handleCumulativeForecast <- function(y, h, t, baseline_length = NULL) {
   y_full <- y
 
@@ -261,38 +310,6 @@ handleCumulativeForecast <- function(y, h, t, baseline_length = NULL) {
     result <- rbind(result, cumForecastN(df_train, df_test, mdl))
   }
 
-  # Calculate z-scores from standardized residuals
-  # Z-score formula: z = (observed - fitted) / sd(baseline_residuals)
-  baseline_residuals <- df_train$asmr - bl$.mean
-  residual_sd <- sd(baseline_residuals, na.rm = TRUE)
-
-  # Z-scores for baseline period
-  zscores_baseline <- round(baseline_residuals / residual_sd, 3)
-  zscores <- zscores_baseline
-
-  # Post-baseline z-scores if we have more data
-  # Generate fitted values for post-baseline period using the baseline model
-  if (baseline_length < length(y_full)) {
-    post_baseline_data <- y_full[(baseline_length + 1):length(y_full)]
-    post_baseline_data_clean <- post_baseline_data[!is.na(post_baseline_data)]
-
-    if (length(post_baseline_data_clean) > 0) {
-      # For cumulative forecasts, use the same linear model to predict post-baseline values
-      # Generate forecast for post-baseline period
-      n_post <- length(post_baseline_data_clean)
-      fc_post <- mdl |> forecast(h = n_post)
-      post_baseline_fitted <- as_tibble(fc_post) |> pull(.mean)
-
-      # Calculate residuals and z-scores
-      post_baseline_residuals <- post_baseline_data_clean - post_baseline_fitted
-      post_baseline_zscores <- post_baseline_residuals / residual_sd
-      zscores <- c(zscores, round(post_baseline_zscores, 3))
-    }
-  }
-
-  # For forecast period, z-scores are 0 (no deviation from model)
-  zscores_fc <- rep(0, h)
-
   # Get post-baseline observed values
   post_baseline_observed <- if (baseline_length < length(y_full)) {
     y_full[(baseline_length + 1):length(y_full)]
@@ -300,11 +317,26 @@ handleCumulativeForecast <- function(y, h, t, baseline_length = NULL) {
     numeric(0)
   }
 
+  # Calculate total result length
+  result_length <- nrow(bl) + length(post_baseline_observed) + h
+
+  # Calculate z-scores using helper function
+  baseline_residuals <- df_train$asmr - bl$.mean
+  zscores <- calculate_zscores(
+    y_full = y_full,
+    baseline_length = baseline_length,
+    baseline_residuals = baseline_residuals,
+    mdl = mdl,
+    result_length = result_length,
+    leading_NA = 0,  # No leading NAs in cumulative forecast
+    h = h
+  )
+
   # Convert cumulative forecasts back to incremental values
   list(
     y = c(bl$.mean, post_baseline_observed, uncumulate(result$asmr)),
     lower = c(rep(NA, nrow(bl) + length(post_baseline_observed)), uncumulate(result$lower)),
     upper = c(rep(NA, nrow(bl) + length(post_baseline_observed)), uncumulate(result$upper)),
-    zscore = c(zscores, zscores_fc)
+    zscore = zscores
   )
 }

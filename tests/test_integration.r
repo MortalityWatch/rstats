@@ -19,16 +19,19 @@ is_server_running <- function() {
   })
 }
 
-# Skip all tests if server is not running
-if (!is_server_running()) {
-  message("Server is not running at ", BASE_URL)
-  message("To run integration tests, start the server first:")
-  message("  Rscript src/serve.r")
-  message("Or set TEST_BASE_URL environment variable to point to a running instance.")
-  quit(save = "no", status = 0)
+# Check if server is running and skip all tests if not
+skip_if_no_server <- function() {
+  if (!is_server_running()) {
+    skip(paste0(
+      "Server is not running at ", BASE_URL, ". ",
+      "To run integration tests, start the server first: Rscript src/serve.r"
+    ))
+  }
 }
 
 test_that("Health endpoint returns correct structure", {
+  skip_if_no_server()
+
   response <- GET(paste0(BASE_URL, "/health"))
 
   expect_equal(status_code(response), 200)
@@ -411,6 +414,35 @@ test_that("Omitting 'b' parameter uses all data (backwards compatible)", {
   body <- content(response_without_b, as = "parsed")
   expect_equal(length(body$y), 7)
   expect_equal(length(body$zscore), 7)
+})
+
+test_that("Baseline with insufficient non-NA values returns 400", {
+  # Baseline period has only NAs
+  response <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "NA,NA,NA,100,105,110",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 3
+  ))
+
+  expect_equal(status_code(response), 400)
+  body <- content(response, as = "parsed")
+  expect_true("error" %in% names(body))
+  expect_match(body$error, "non-NA values")
+
+  # Baseline period has only 2 non-NA values (need 3)
+  response2 <- GET(paste0(BASE_URL, "/"), query = list(
+    y = "100,NA,105,NA,110,115",
+    h = 2,
+    s = 1,
+    m = "mean",
+    b = 3
+  ))
+
+  expect_equal(status_code(response2), 400)
+  body2 <- content(response2, as = "parsed")
+  expect_match(body2$error, "only 2 non-NA values")
 })
 
 message("\nIntegration tests completed successfully!")

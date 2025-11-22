@@ -9,9 +9,25 @@ library(fiery)
 library(tsibble)
 
 # Load utility functions and handlers
-source("utils.r")
-source("handlers.r")
-source("sentry.r")
+# Find the src directory
+if (file.exists("utils.r")) {
+  # Running from src/ directory
+  source("utils.r")
+  source("handlers.r")
+  source("sentry.r")
+} else if (file.exists("src/utils.r")) {
+  # Running from project root
+  source("src/utils.r")
+  source("src/handlers.r")
+  source("src/sentry.r")
+} else if (file.exists("../src/utils.r")) {
+  # Being sourced from tests/
+  source("../src/utils.r")
+  source("../src/handlers.r")
+  source("../src/sentry.r")
+} else {
+  stop("Cannot find utils.r - make sure you're running from the correct directory")
+}
 
 # Initialize Sentry error tracking
 init_sentry()
@@ -173,6 +189,16 @@ validate_request <- function(query, path) {
         status = 400,
         message = "Parameter 'b' must be at least 3 to calculate meaningful statistics"
       ))
+    }
+    # Validate that baseline period has sufficient non-NA values
+    baseline_data <- y[1:b]
+    non_na_count <- sum(!is.na(baseline_data))
+    if (non_na_count < 3) {
+      msg <- paste0(
+        "Baseline period (first ", b, " values) contains only ", non_na_count,
+        " non-NA values. At least 3 non-NA values are required."
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
     }
   }
 

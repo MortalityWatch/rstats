@@ -109,6 +109,3 @@ test_that("agg_pred requires variance-covariance matrix", {
     "'predObject' has no variance-covariance matrix!"
   )
 })
-
-# Run all tests
-test_dir(".")
