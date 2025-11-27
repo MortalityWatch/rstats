@@ -310,15 +310,24 @@ handleCumulativeForecast <- function(y, h, t, baseline_length = NULL) {
     result <- rbind(result, cumForecastN(df_train, df_test, mdl))
   }
 
-  # Get post-baseline observed values
-  post_baseline_observed <- if (baseline_length < length(y_full)) {
-    y_full[(baseline_length + 1):length(y_full)]
+  # Get post-baseline period length
+  n_post_baseline <- if (baseline_length < length(y_full)) {
+    length(y_full) - baseline_length
+  } else {
+    0
+  }
+
+  # Generate baseline predictions for post-baseline period
+  # (what the baseline model predicts, not observed values)
+  post_baseline_predicted <- if (n_post_baseline > 0) {
+    fc_post <- mdl |> forecast(h = n_post_baseline)
+    as_tibble(fc_post) |> pull(.mean)
   } else {
     numeric(0)
   }
 
   # Calculate total result length
-  result_length <- nrow(bl) + length(post_baseline_observed) + h
+  result_length <- nrow(bl) + n_post_baseline + h
 
   # Calculate z-scores using helper function
   baseline_residuals <- df_train$asmr - bl$.mean
@@ -334,9 +343,9 @@ handleCumulativeForecast <- function(y, h, t, baseline_length = NULL) {
 
   # Convert cumulative forecasts back to incremental values
   list(
-    y = c(bl$.mean, post_baseline_observed, uncumulate(result$asmr)),
-    lower = c(rep(NA, nrow(bl) + length(post_baseline_observed)), uncumulate(result$lower)),
-    upper = c(rep(NA, nrow(bl) + length(post_baseline_observed)), uncumulate(result$upper)),
+    y = c(bl$.mean, post_baseline_predicted, uncumulate(result$asmr)),
+    lower = c(rep(NA, nrow(bl) + n_post_baseline), uncumulate(result$lower)),
+    upper = c(rep(NA, nrow(bl) + n_post_baseline), uncumulate(result$upper)),
     zscore = zscores
   )
 }
