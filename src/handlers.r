@@ -201,18 +201,27 @@ handleForecast <- function(y, h, m, s, t, baseline_length = NULL) {
     select(.mean, "95%_lower", "95%_upper") |>
     setNames(c("y", "lower", "upper"))
 
-  # Combine baseline fitted values, post-baseline observed values, and forecast
-  # For post-baseline period: use actual observed values (not fitted)
-  post_baseline_observed <- if (baseline_length < length(y_full)) {
-    y_full[(baseline_length + 1):length(y_full)]
+  # Get post-baseline period length
+  n_post_baseline <- if (baseline_length < length(y_full)) {
+    length(y_full) - baseline_length
+  } else {
+    0
+  }
+
+  # Generate baseline predictions for post-baseline period
+  # (what the baseline model predicts, not observed values)
+  post_baseline_predicted <- if (n_post_baseline > 0) {
+    fc_post <- mdl |> forecast(h = n_post_baseline)
+    as_tibble(fc_post) |> pull(.mean)
   } else {
     numeric(0)
   }
 
+  # Combine baseline fitted values, post-baseline predictions, and forecast
   result <- bind_rows(
     tibble(y = rep(NA, leading_NA)),
     tibble(y = bl$.mean),
-    tibble(y = post_baseline_observed),
+    tibble(y = post_baseline_predicted),
     result
   ) |>
     mutate_if(is.numeric, round, 1)
