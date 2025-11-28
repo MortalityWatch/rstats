@@ -111,6 +111,125 @@ test_that("validate_request rejects invalid method", {
   expect_match(result$message, "naive, mean, median, lin_reg, exp")
 })
 
+# ============================================================================
+# bs/be parameter validation tests
+# ============================================================================
+
+test_that("validate_request accepts valid bs/be parameters", {
+  query <- list(
+    y = "10,20,30,40,50,60,70,80",
+    h = "2",
+    s = "1",
+    m = "mean",
+    bs = "3",
+    be = "5"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request rejects bs without be", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    bs = "1"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "must both be provided together")
+})
+
+test_that("validate_request rejects be without bs", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    be = "3"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "must both be provided together")
+})
+
+test_that("validate_request rejects bs < 1", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    bs = "0",
+    be = "3"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "bs.*>= 1")
+})
+
+test_that("validate_request rejects be <= bs", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    bs = "3",
+    be = "3"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "be.*> 'bs'")
+})
+
+test_that("validate_request rejects be > length(y)", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    bs = "1",
+    be = "10"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "be.*<= data length")
+})
+
+test_that("validate_request rejects bs/be with insufficient non-NA values", {
+  query <- list(
+    y = "10,NA,NA,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    bs = "1",
+    be = "3"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "At least 3 non-NA values")
+})
+
 test_that("generate_cache_key creates consistent keys", {
   query1 <- list(y = "10,20,30", h = "5", s = "1", m = "mean")
   query2 <- list(m = "mean", s = "1", h = "5", y = "10,20,30") # Different order

@@ -168,8 +168,51 @@ validate_request <- function(query, path) {
     return(list(valid = FALSE, status = 400, message = "Parameter 'y' exceeds maximum length of 10000"))
   }
 
-  # Validate 'b' (baseline_length) if provided
-  if (!is.null(query$b)) {
+  # Validate baseline parameters: bs/be (new) or b (legacy)
+  if (!is.null(query$bs) || !is.null(query$be)) {
+    # New bs/be parameter mode
+    if (is.null(query$bs) || is.null(query$be)) {
+      return(list(
+        valid = FALSE,
+        status = 400,
+        message = "Parameters 'bs' and 'be' must both be provided together"
+      ))
+    }
+
+    bs <- tryCatch(as.integer(query$bs), error = function(e) NA)
+    be <- tryCatch(as.integer(query$be), error = function(e) NA)
+
+    if (is.na(bs)) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'bs' must be an integer"))
+    }
+    if (is.na(be)) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'be' must be an integer"))
+    }
+    if (bs < 1) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'bs' must be >= 1"))
+    }
+    if (be <= bs) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'be' must be > 'bs'"))
+    }
+    if (be > length(y)) {
+      msg <- paste0(
+        "Parameter 'be' (", be, ") must be <= data length (", length(y), ")"
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
+    }
+
+    # Validate that baseline period has sufficient non-NA values
+    baseline_data <- y[bs:be]
+    non_na_count <- sum(!is.na(baseline_data))
+    if (non_na_count < 3) {
+      msg <- paste0(
+        "Baseline period (y[", bs, ":", be, "]) contains only ", non_na_count,
+        " non-NA values. At least 3 non-NA values are required."
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
+    }
+  } else if (!is.null(query$b)) {
+    # Legacy 'b' parameter mode (backwards compatibility)
     b <- tryCatch(as.integer(query$b), error = function(e) NA)
     if (is.na(b)) {
       return(list(valid = FALSE, status = 400, message = "Parameter 'b' must be an integer"))
@@ -245,6 +288,7 @@ send_error <- function(server, request, status, message) {
   response$body <- jsonlite::toJSON(list(error = message, status = status), auto_unbox = TRUE)
   response$status <- status
   response$type <- "json"
+  response$set_header("Access-Control-Allow-Origin", "*")
   return(response)
 }
 
@@ -277,6 +321,7 @@ app$on("request", function(server, request, ...) {
     ), auto_unbox = TRUE)
     response$status <- 200L
     response$type <- "json"
+    response$set_header("Access-Control-Allow-Origin", "*")
 
     log_message("INFO", "Health check", list(status = "ok"))
     return(response)
@@ -319,10 +364,11 @@ app$on("request", function(server, request, ...) {
     ))
 
     response <- request$respond()
-    response$body <- jsonlite::toJSON(cached_result, auto_unbox = TRUE)
+    response$body <- jsonlite::toJSON(cached_result, auto_unbox = TRUE, na = "null")
     response$status <- 200L
     response$type <- "json"
     response$set_header("X-Cache", "HIT")
+    response$set_header("Access-Control-Allow-Origin", "*")
     return(response)
   }
 
@@ -330,17 +376,28 @@ app$on("request", function(server, request, ...) {
   y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
   h <- as.integer(request$query$h %||% 1)
   t <- as.integer(request$query$t %||% 0) == 1
-  b <- if (!is.null(request$query$b)) as.integer(request$query$b) else NULL
+
+  # Parse baseline parameters: bs/be (new) or b (legacy)
+  bs <- NULL
+  be <- NULL
+  if (!is.null(request$query$bs) && !is.null(request$query$be)) {
+    bs <- as.integer(request$query$bs)
+    be <- as.integer(request$query$be)
+  } else if (!is.null(request$query$b)) {
+    # Legacy mode: bs=1, be=b
+    bs <- 1L
+    be <- as.integer(request$query$b)
+  }
 
   # Process request with error handling
   res <- tryCatch({
     if (request$path == "/") {
       m <- request$query$m
       s <- as.integer(request$query$s)
-      handleForecast(y, h, m, s, t, b)
+      handleForecast(y, h, m, s, t, bs, be)
     } else {
       # request$path == "/cum" (already validated above)
-      handleCumulativeForecast(y, h, t, b)
+      handleCumulativeForecast(y, h, t, bs, be)
     }
   }, error = function(e) {
     log_message("ERROR", "Processing failed", list(
@@ -376,10 +433,11 @@ app$on("request", function(server, request, ...) {
 
   # Send successful response
   response <- request$respond()
-  response$body <- jsonlite::toJSON(res, auto_unbox = TRUE)
+  response$body <- jsonlite::toJSON(res, auto_unbox = TRUE, na = "null")
   response$status <- 200L
   response$type <- "json"
   response$set_header("X-Cache", "MISS")
+  response$set_header("Access-Control-Allow-Origin", "*")
 
   # Log completion
   duration_ms <- round(as.numeric(difftime(Sys.time(), start_time, units = "secs")) * 1000, 2)
