@@ -264,14 +264,14 @@ test_that("Baseline length parameter 'b' works for standard forecast", {
   expect_equal(length(body$zscore), 12)
 
   # Z-scores should exist for all observed data (indices 1-10)
-  expect_true(!is.na(body$zscore[[1]]))
-  expect_true(!is.na(body$zscore[[5]])) # Last baseline point
-  expect_true(!is.na(body$zscore[[6]])) # First post-baseline point
-  expect_true(!is.na(body$zscore[[10]])) # Last observed point
+  expect_true(!is.null(body$zscore[[1]]))
+  expect_true(!is.null(body$zscore[[5]])) # Last baseline point
+  expect_true(!is.null(body$zscore[[6]])) # First post-baseline point
+  expect_true(!is.null(body$zscore[[10]])) # Last observed point
 
-  # Forecast z-scores should be 0
-  expect_equal(body$zscore[[11]], 0)
-  expect_equal(body$zscore[[12]], 0)
+  # Forecast z-scores should be null (NA in R -> null in JSON)
+  expect_null(body$zscore[[11]])
+  expect_null(body$zscore[[12]])
 })
 
 test_that("Baseline length parameter 'b' works for cumulative forecast", {
@@ -291,12 +291,12 @@ test_that("Baseline length parameter 'b' works for cumulative forecast", {
   expect_equal(length(body$zscore), 8)
 
   # Z-scores should exist for all observed data
-  expect_true(!is.na(body$zscore[[1]]))
-  expect_true(!is.na(body$zscore[[6]])) # Last observed point
+  expect_true(!is.null(body$zscore[[1]]))
+  expect_true(!is.null(body$zscore[[6]])) # Last observed point
 
-  # Forecast z-scores should be 0
-  expect_equal(body$zscore[[7]], 0)
-  expect_equal(body$zscore[[8]], 0)
+  # Forecast z-scores should be null (NA in R -> null in JSON)
+  expect_null(body$zscore[[7]])
+  expect_null(body$zscore[[8]])
 })
 
 test_that("Baseline length 'b' with different methods works", {
