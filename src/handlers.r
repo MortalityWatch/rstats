@@ -127,6 +127,40 @@ calculate_zscores <- function(y_full, bs, be, baseline_residuals,
   zscores
 }
 
+#' Parse xs (start time index) string into appropriate tsibble index
+#'
+#' @param xs Character string representing start time (e.g., "2020W10", "2020-01", "2020Q1", "2020")
+#' @param s Integer seasonality type: 1=year, 2=quarter, 3=month, 4=week
+#' @return Appropriate tsibble time index object
+parse_xs <- function(xs, s) {
+  if (is.null(xs)) return(NULL)
+
+  xs <- as.character(xs)
+
+  if (s == 4) {
+    # Weekly: "2020W10" or "2020-W10"
+    xs_normalized <- gsub("-", "", toupper(xs))
+    year <- as.integer(substr(xs_normalized, 1, 4))
+    week <- as.integer(sub(".*W", "", xs_normalized))
+    return(make_yearweek(year, week))
+  } else if (s == 3) {
+    # Monthly: "2020-01" or "202001"
+    xs_normalized <- gsub("-", "", xs)
+    year <- as.integer(substr(xs_normalized, 1, 4))
+    month <- as.integer(substr(xs_normalized, 5, 6))
+    return(make_yearmonth(year, month))
+  } else if (s == 2) {
+    # Quarterly: "2020Q1" or "2020-Q1"
+    xs_normalized <- gsub("-", "", toupper(xs))
+    year <- as.integer(substr(xs_normalized, 1, 4))
+    quarter <- as.integer(sub(".*Q", "", xs_normalized))
+    return(make_yearquarter(year, quarter))
+  } else {
+    # Yearly: "2020"
+    return(as.integer(xs))
+  }
+}
+
 #' Handle standard forecast request
 #'
 #' Performs time series forecasting using various methods (naive, mean, linear regression, exponential smoothing)
@@ -138,6 +172,12 @@ calculate_zscores <- function(y_full, bs, be, baseline_residuals,
 #' @param t Boolean whether to include trend
 #' @param bs Baseline start index (1-indexed, optional). If NULL, defaults to 1.
 #' @param be Baseline end index (1-indexed, optional). If NULL, defaults to length(y).
+#' @param xs Character start time index (optional). Format depends on s:
+#'   - s=4 (weekly): "2020W10" or "2020-W10"
+#'   - s=3 (monthly): "2020-01" or "202001"
+#'   - s=2 (quarterly): "2020Q1" or "2020-Q1"
+#'   - s=1 (yearly): "2020"
+#'   If NULL, uses synthetic time indices starting from 2000.
 #'
 #' @details
 #' Z-score Calculation:
@@ -152,7 +192,7 @@ calculate_zscores <- function(y_full, bs, be, baseline_residuals,
 #' value differs significantly from what the baseline model would have predicted.
 #'
 #' @return List with y (fitted + forecast), lower, and upper bounds, and zscore
-handleForecast <- function(y, h, m, s, t, bs = NULL, be = NULL) {
+handleForecast <- function(y, h, m, s, t, bs = NULL, be = NULL, xs = NULL) {
   y_full <- y
 
   # Set defaults for baseline start/end if not provided
@@ -175,12 +215,29 @@ handleForecast <- function(y, h, m, s, t, bs = NULL, be = NULL) {
   df_baseline <- tibble(year = seq.int(actual_bs, be), asmr = y_baseline_clean)
 
   # Convert to appropriate time series index based on seasonality
+  # Use xs if provided, otherwise fall back to synthetic indices starting from 2000
+
+  start_index <- parse_xs(xs, s)
+
   if (s == 2) {
-    df_baseline$year <- make_yearquarter(2000, 1) + 0:(length(y_baseline_clean) - 1)
+    if (is.null(start_index)) {
+      start_index <- make_yearquarter(2000, 1)
+    }
+    # Offset start_index if baseline doesn't start at position 1
+    df_baseline$year <- (start_index + (actual_bs - 1)) + 0:(length(y_baseline_clean) - 1)
   } else if (s == 3) {
-    df_baseline$year <- make_yearmonth(2000, 1) + 0:(length(y_baseline_clean) - 1)
+    if (is.null(start_index)) {
+      start_index <- make_yearmonth(2000, 1)
+    }
+    df_baseline$year <- (start_index + (actual_bs - 1)) + 0:(length(y_baseline_clean) - 1)
   } else if (s == 4) {
-    df_baseline$year <- make_yearweek(2000, 1) + 0:(length(y_baseline_clean) - 1)
+    if (is.null(start_index)) {
+      start_index <- make_yearweek(2000, 1)
+    }
+    df_baseline$year <- (start_index + (actual_bs - 1)) + 0:(length(y_baseline_clean) - 1)
+  } else if (s == 1 && !is.null(start_index)) {
+    # Yearly with explicit start
+    df_baseline$year <- (start_index + (actual_bs - 1)) + 0:(length(y_baseline_clean) - 1)
   }
 
   # Convert to tsibble and remove any remaining interspersed NAs
