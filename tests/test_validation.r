@@ -319,3 +319,215 @@ test_that("rate limiting resets after window expires", {
   # Verify count was reset
   expect_equal(rate_limit_store[[ip]]$count, 1)
 })
+
+# ============================================================================
+# xs (start time index) parameter validation tests
+# ============================================================================
+
+test_that("validate_request accepts valid xs for weekly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "4",
+    m = "mean",
+    xs = "2020W10"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request accepts xs with hyphen for weekly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "4",
+    m = "mean",
+    xs = "2020-W10"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request accepts valid xs for monthly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "3",
+    m = "mean",
+    xs = "2020-01"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request accepts xs without hyphen for monthly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "3",
+    m = "mean",
+    xs = "202001"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request accepts valid xs for quarterly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "2",
+    m = "mean",
+    xs = "2020Q1"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request accepts xs with hyphen for quarterly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "2",
+    m = "mean",
+    xs = "2020-Q3"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request accepts valid xs for yearly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    xs = "2020"
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request rejects invalid xs format for weekly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "4",
+    m = "mean",
+    xs = "2020-01"  # Monthly format for weekly data
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "YYYYWNN")
+})
+
+test_that("validate_request rejects invalid week number", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "4",
+    m = "mean",
+    xs = "2020W54"  # Week 54 doesn't exist
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "1-53")
+})
+
+test_that("validate_request rejects invalid xs format for monthly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "3",
+    m = "mean",
+    xs = "2020W10"  # Weekly format for monthly data
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "YYYY-MM")
+})
+
+test_that("validate_request rejects invalid month number", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "3",
+    m = "mean",
+    xs = "2020-13"  # Month 13 doesn't exist
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "01-12")
+})
+
+test_that("validate_request rejects invalid xs format for quarterly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "2",
+    m = "mean",
+    xs = "2020Q5"  # Quarter 5 doesn't exist
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "YYYYQN")
+})
+
+test_that("validate_request rejects invalid xs format for yearly data", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "1",
+    m = "mean",
+    xs = "20"  # Too short
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "YYYY")
+})
+
+test_that("validate_request accepts week 53 in xs", {
+  query <- list(
+    y = "10,20,30,40,50",
+    h = "2",
+    s = "4",
+    m = "mean",
+    xs = "2020W53"  # 2020 had 53 weeks
+  )
+
+  result <- validate_request(query, "/")
+
+  expect_true(result$valid)
+})

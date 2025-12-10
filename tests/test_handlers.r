@@ -500,4 +500,188 @@ test_that("Forecast values are rounded to 1 decimal", {
   }
 })
 
+# ============================================================================
+# xs (start time index) parameter tests
+# ============================================================================
+
+test_that("parse_xs correctly parses weekly format", {
+  # Test various weekly formats
+  result <- parse_xs("2020W10", 4)
+  expect_true(inherits(result, "yearweek"))
+  expect_equal(format(result), "2020 W10")
+
+  # With hyphen
+  result2 <- parse_xs("2020-W10", 4)
+  expect_equal(format(result2), "2020 W10")
+
+  # Week 1
+  result3 <- parse_xs("2020W01", 4)
+  expect_equal(format(result3), "2020 W01")
+
+  # Week 53
+  result4 <- parse_xs("2020W53", 4)
+  expect_equal(format(result4), "2020 W53")
+})
+
+test_that("parse_xs correctly parses monthly format", {
+  result <- parse_xs("2020-01", 3)
+  expect_true(inherits(result, "yearmonth"))
+  expect_equal(format(result), "2020 Jan")
+
+  # Without hyphen
+  result2 <- parse_xs("202012", 3)
+  expect_equal(format(result2), "2020 Dec")
+})
+
+test_that("parse_xs correctly parses quarterly format", {
+  result <- parse_xs("2020Q1", 2)
+  expect_true(inherits(result, "yearquarter"))
+  expect_equal(format(result), "2020 Q1")
+
+  # With hyphen
+  result2 <- parse_xs("2020-Q4", 2)
+  expect_equal(format(result2), "2020 Q4")
+})
+
+test_that("parse_xs correctly parses yearly format", {
+  result <- parse_xs("2020", 1)
+  expect_equal(result, 2020L)
+})
+
+test_that("parse_xs returns NULL for NULL input", {
+  expect_null(parse_xs(NULL, 1))
+  expect_null(parse_xs(NULL, 4))
+})
+
+test_that("handleForecast with xs uses correct weekly time indices", {
+  # Create 8 weeks of data starting from week 50 of 2020
+  # This crosses year boundary and includes potential week 53
+  y <- c(100, 105, 110, 115, 120, 125, 130, 135)
+  h <- 4
+  m <- "mean"
+  s <- 4  # Weekly
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t, xs = "2020W50")
+
+  check_forecast_result(result, length(y) + h)
+
+  # Should have forecasts
+  expect_true(all(!is.na(result$y)))
+})
+
+test_that("handleForecast with xs uses correct monthly time indices", {
+  # 12 months of data starting from October 2020
+  y <- c(100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155)
+  h <- 3
+  m <- "mean"
+  s <- 3  # Monthly
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t, xs = "2020-10")
+
+  check_forecast_result(result, length(y) + h)
+})
+
+test_that("handleForecast with xs uses correct quarterly time indices", {
+  # 8 quarters of data starting from Q3 2020
+  y <- c(100, 105, 110, 115, 120, 125, 130, 135)
+  h <- 2
+  m <- "mean"
+  s <- 2  # Quarterly
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t, xs = "2020Q3")
+
+  check_forecast_result(result, length(y) + h)
+})
+
+test_that("handleForecast with xs uses correct yearly time indices", {
+  # 5 years of data starting from 2018
+  y <- c(100, 105, 110, 115, 120)
+  h <- 2
+  m <- "mean"
+  s <- 1  # Yearly
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t, xs = "2018")
+
+  check_forecast_result(result, length(y) + h)
+})
+
+test_that("handleForecast without xs falls back to synthetic indices", {
+  # This should work the same as before (backwards compatible)
+  y <- c(100, 105, 110, 115, 120)
+  h <- 2
+  m <- "mean"
+  s <- 4  # Weekly
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t)
+
+  check_forecast_result(result, length(y) + h)
+})
+
+test_that("handleForecast with xs and bs/be works correctly", {
+  # 10 weeks of data, baseline is weeks 3-6, starting from week 10
+  y <- c(100, 105, 110, 108, 112, 115, 200, 205, 210, 215)
+  h <- 2
+  m <- "mean"
+  s <- 4  # Weekly
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t, bs = 3, be = 6, xs = "2020W10")
+
+  check_forecast_result(result, length(y) + h)
+
+  # Pre-baseline z-scores should be calculated
+  expect_true(!is.na(result$zscore[1]))
+  expect_true(!is.na(result$zscore[2]))
+
+  # Post-baseline z-scores (higher values) should be positive
+  expect_true(result$zscore[7] > 0)
+  expect_true(result$zscore[10] > 0)
+})
+
+test_that("handleForecast with xs handles week 53 correctly", {
+  # Data spanning a year with week 53 (2020 had 53 weeks)
+  # Start at week 51 of 2020, which should go: W51, W52, W53, then 2021 W01, W02, etc.
+  y <- c(100, 105, 110, 115, 120, 125, 130, 135)  # 8 weeks
+  h <- 4
+  m <- "mean"
+  s <- 4
+  t <- FALSE
+
+  result <- handleForecast(y, h, m, s, t, xs = "2020W51")
+
+  check_forecast_result(result, length(y) + h)
+
+  # Model should handle week 53 without error
+  expect_true(all(!is.na(result$y)))
+})
+
+test_that("handleForecast seasonal patterns align with actual calendar weeks", {
+  # Create synthetic weekly data with clear seasonal pattern
+  # Weekly pattern: higher values at end of each "year" (week 52)
+  # 104 weeks = 2 years of weekly data starting from week 1
+  set.seed(42)
+  weekly_pattern <- rep(c(rep(100, 51), 150), 2)  # Week 52 is higher
+  y <- weekly_pattern + rnorm(104, 0, 5)
+  h <- 52
+  m <- "mean"
+  s <- 4
+  t <- FALSE
+
+  # With xs starting at week 1, the seasonal pattern should be learned correctly
+  result <- handleForecast(y, h, m, s, t, xs = "2020W01")
+
+  check_forecast_result(result, length(y) + h)
+
+  # The forecast for week 52 positions should be higher than other weeks
+  # Forecast starts at position 105, so week 52 of year 3 would be at position 156
+  forecast_values <- tail(result$y, h)
+  # Week 52 values (positions 52 in forecast) should be elevated
+  expect_true(forecast_values[52] > mean(forecast_values[1:51]))
+})
+
 message("\nHandler tests completed!")

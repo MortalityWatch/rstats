@@ -272,6 +272,62 @@ validate_request <- function(query, path) {
         message = "Parameter 'm' must be one of: naive, mean, median, lin_reg, exp"
       ))
     }
+
+    # Validate 'xs' (start time index) if provided
+    if (!is.null(query$xs)) {
+      xs <- as.character(query$xs)
+      xs_valid <- FALSE
+      xs_error <- NULL
+
+      if (s == 4) {
+        # Weekly: expect format like "2020W10" or "2020-W10"
+        if (grepl("^\\d{4}-?W\\d{1,2}$", xs, ignore.case = TRUE)) {
+          # Normalize format: remove hyphen if present
+          xs_normalized <- gsub("-", "", toupper(xs))
+          year <- as.integer(substr(xs_normalized, 1, 4))
+          week <- as.integer(sub(".*W", "", xs_normalized))
+          if (!is.na(year) && !is.na(week) && week >= 1 && week <= 53) {
+            xs_valid <- TRUE
+          } else {
+            xs_error <- "Invalid week number in 'xs' (must be 1-53)"
+          }
+        } else {
+          xs_error <- "Parameter 'xs' for weekly data must be in format 'YYYYWNN' (e.g., '2020W10')"
+        }
+      } else if (s == 3) {
+        # Monthly: expect format like "2020-01" or "202001"
+        if (grepl("^\\d{4}-?\\d{2}$", xs)) {
+          xs_normalized <- gsub("-", "", xs)
+          year <- as.integer(substr(xs_normalized, 1, 4))
+          month <- as.integer(substr(xs_normalized, 5, 6))
+          if (!is.na(year) && !is.na(month) && month >= 1 && month <= 12) {
+            xs_valid <- TRUE
+          } else {
+            xs_error <- "Invalid month number in 'xs' (must be 01-12)"
+          }
+        } else {
+          xs_error <- "Parameter 'xs' for monthly data must be in format 'YYYY-MM' (e.g., '2020-01')"
+        }
+      } else if (s == 2) {
+        # Quarterly: expect format like "2020Q1" or "2020-Q1"
+        if (grepl("^\\d{4}-?Q[1-4]$", xs, ignore.case = TRUE)) {
+          xs_valid <- TRUE
+        } else {
+          xs_error <- "Parameter 'xs' for quarterly data must be in format 'YYYYQN' (e.g., '2020Q1')"
+        }
+      } else if (s == 1) {
+        # Yearly: expect just a year like "2020"
+        if (grepl("^\\d{4}$", xs)) {
+          xs_valid <- TRUE
+        } else {
+          xs_error <- "Parameter 'xs' for yearly data must be in format 'YYYY' (e.g., '2020')"
+        }
+      }
+
+      if (!xs_valid) {
+        return(list(valid = FALSE, status = 400, message = xs_error))
+      }
+    }
   }
 
   return(list(valid = TRUE))
@@ -389,12 +445,15 @@ app$on("request", function(server, request, ...) {
     be <- as.integer(request$query$b)
   }
 
+  # Parse xs (start time index) - optional
+  xs <- request$query$xs
+
   # Process request with error handling
   res <- tryCatch({
     if (request$path == "/") {
       m <- request$query$m
       s <- as.integer(request$query$s)
-      handleForecast(y, h, m, s, t, bs, be)
+      handleForecast(y, h, m, s, t, bs, be, xs)
     } else {
       # request$path == "/cum" (already validated above)
       handleCumulativeForecast(y, h, t, bs, be)
