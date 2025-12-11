@@ -424,6 +424,7 @@ app$on("request", function(server, request, ...) {
     response$status <- 200L
     response$type <- "json"
     response$set_header("X-Cache", "HIT")
+    response$set_header("Cache-Control", "public, max-age=604800")
     response$set_header("Access-Control-Allow-Origin", "*")
     return(response)
   }
@@ -496,6 +497,7 @@ app$on("request", function(server, request, ...) {
   response$status <- 200L
   response$type <- "json"
   response$set_header("X-Cache", "MISS")
+  response$set_header("Cache-Control", "public, max-age=604800")
   response$set_header("Access-Control-Allow-Origin", "*")
 
   # Log completion
