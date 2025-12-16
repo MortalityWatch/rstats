@@ -57,7 +57,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:stats.mortality.watch)",
       "Bash(ls:*)",
-      "Bash(./deploy.sh:*)"
+      "Bash(./deploy.sh:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []
