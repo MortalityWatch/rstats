@@ -53,7 +53,11 @@
       "Bash(do)",
       "Bash(if curl -s http://localhost:5000/health)",
       "Bash(then)",
-      "Bash(timeout 10 Rscript:*)"
+      "Bash(timeout 10 Rscript:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:stats.mortality.watch)",
+      "Bash(ls:*)",
+      "Bash(./deploy.sh:*)"
     ],
     "deny": [],
     "ask": []
