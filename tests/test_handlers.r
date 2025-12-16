@@ -479,7 +479,7 @@ test_that("Z-score precision is 3 decimals", {
   }
 })
 
-test_that("Forecast values are rounded to 1 decimal", {
+test_that("Forecast values are rounded to 2 decimals", {
   y <- c(100.123, 105.456, 110.789)
   h <- 2
   m <- "mean"
@@ -488,13 +488,13 @@ test_that("Forecast values are rounded to 1 decimal", {
 
   result <- handleForecast(y, h, m, s, t)
 
-  # Check forecast values are rounded to 1 decimal
+  # Check forecast values are rounded to 2 decimals
   for (val in result$y) {
     if (!is.na(val)) {
       val_str <- as.character(val)
       if (grepl("\\.", val_str)) {
         decimals <- nchar(strsplit(val_str, "\\.")[[1]][2])
-        expect_true(decimals <= 1)
+        expect_true(decimals <= 2)
       }
     }
   }

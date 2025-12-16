@@ -354,7 +354,7 @@ handleForecast <- function(y, h, m, s, t, bs = NULL, be = NULL, xs = NULL) {
     post_baseline_result,
     fc_beyond_result
   ) |>
-    mutate_if(is.numeric, round, 1)
+    mutate_if(is.numeric, round, 2)
 
   # Calculate z-scores using helper function
   # Use actual_bs for z-score calculation when there are leading NAs
@@ -390,9 +390,9 @@ cumForecastN <- function(df_train, df_test, mdl) {
   res <- agg_pred(rep.int(x = 1, length(oo$fit)), oo, alpha = .95)
 
   tibble(
-    asmr = round(fc_sum_mean, 1),
-    lower = round(res$PI[1], 1),
-    upper = round(res$PI[2], 1)
+    asmr = round(fc_sum_mean, 2),
+    lower = round(res$PI[1], 2),
+    upper = round(res$PI[2], 2)
   )
 }
 
