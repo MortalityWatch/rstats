@@ -553,9 +553,8 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
 #'   period = "yearly"
 #' )
 handleLifeTable <- function(deaths, population, ages, period = "yearly", sex = "t") {
-  library(DemoTools)
 
-  # Convert sex parameter to DemoTools format
+  # Normalize sex parameter
   sex_map <- c("m" = "m", "f" = "f", "t" = "t", "male" = "m", "female" = "f", "total" = "t")
   sex_code <- sex_map[tolower(sex)]
   if (is.na(sex_code)) sex_code <- "t"
@@ -614,10 +613,13 @@ handleLifeTable <- function(deaths, population, ages, period = "yearly", sex = "
 
 #' Build a single life table and extract key statistics
 #'
+#' Uses Chiang's method for abridged life tables. This is a pure R implementation
+#' that doesn't require external dependencies like DemoTools.
+#'
 #' @param deaths Numeric vector of deaths by age group
 #' @param population Numeric vector of population by age group
 #' @param ages Numeric vector of age group start values
-#' @param sex Character: "m", "f", or "t"
+#' @param sex Character: "m", "f", or "t" (used for nax estimation)
 #' @return List with e0, e65
 build_single_life_table <- function(deaths, population, ages, sex) {
   # Calculate age-specific mortality rates
@@ -626,80 +628,54 @@ build_single_life_table <- function(deaths, population, ages, sex) {
   # Handle edge cases: zero population or deaths
   nMx[is.na(nMx) | is.infinite(nMx)] <- 0
 
-  # Build life table using DemoTools::lt_abridged()
-  # This function is specifically designed for abridged (grouped) life tables
-  # and handles 85+ closure properly via mortality extrapolation
-  lt <- tryCatch({
-    lt_abridged(
-      nMx = nMx,
-      Age = ages,
-      axmethod = "un",        # UN method for nax (handles infant mortality well)
-      Sex = sex,
-      extrapLaw = "kannisto", # Handles oldest-old mortality deceleration
-      extrapFrom = 80,        # Start extrapolation from age 80
-      OAnew = 110,            # Extend to age 110 (HMD standard)
-      radix = 100000
-    )
-  }, error = function(e) {
-    # Fallback: simpler calculation if DemoTools fails
-    warning(paste("DemoTools::lt_abridged failed, using fallback:", e$message))
-    n_ages <- length(ages)
-    AgeInt <- if (n_ages > 1) c(diff(ages), NA) else NA
-    return(fallback_life_table(nMx, ages, AgeInt))
-  })
+  # Calculate age interval widths
+  n_ages <- length(ages)
+  AgeInt <- if (n_ages > 1) c(diff(ages), NA) else NA
+
+  # Build life table using Chiang's method
+  lt <- chiang_life_table(nMx, ages, AgeInt, sex)
 
   # Extract life expectancies
   e0 <- lt$ex[1]
 
   # Find e65 (life expectancy at age 65)
-  # lt_abridged returns a data frame with Age column
-  if ("Age" %in% names(lt)) {
-    age_65_idx <- which(lt$Age == 65)
-    if (length(age_65_idx) == 0) {
-      age_65_idx <- which(lt$Age >= 65)[1]
-    }
-    e65 <- if (!is.na(age_65_idx) && age_65_idx <= length(lt$ex)) lt$ex[age_65_idx] else NA
-  } else {
-    # Fallback structure
-    age_65_idx <- which(ages == 65)
-    if (length(age_65_idx) == 0) {
-      age_65_idx <- which(ages >= 65)[1]
-    }
-    e65 <- if (!is.na(age_65_idx) && age_65_idx <= length(lt$ex)) lt$ex[age_65_idx] else NA
+  age_65_idx <- which(ages == 65)
+  if (length(age_65_idx) == 0) {
+    age_65_idx <- which(ages >= 65)[1]
   }
+  e65 <- if (!is.na(age_65_idx) && age_65_idx <= length(lt$ex)) lt$ex[age_65_idx] else NA
 
   list(e0 = e0, e65 = e65)
 }
 
-#' Fallback life table calculation using Chiang's method directly
+#' Chiang life table calculation
 #'
-#' Used when DemoTools::LT() fails (e.g., edge cases with sparse data)
+#' Pure R implementation of Chiang's method for abridged life tables.
+#' No external dependencies required.
 #'
 #' @param nMx Age-specific mortality rates
 #' @param ages Age group starts
 #' @param AgeInt Age interval widths
-#' @return List matching DemoTools::LT output structure
-fallback_life_table <- function(nMx, ages, AgeInt) {
+#' @param sex Character: "m", "f", or "t" for nax estimation
+#' @return List with life table columns
+chiang_life_table <- function(nMx, ages, AgeInt, sex = "t") {
   n_ages <- length(ages)
 
-  # Default nax values (average years lived in interval by those who die)
-  nax <- rep(0.5, n_ages)
-  if (ages[1] == 0) {
-    nax[1] <- 0.1  # Infant mortality: deaths occur early in first year
-    if (n_ages > 1 && ages[2] <= 5) {
-      nax[2] <- 0.4  # Early childhood
-    }
-  }
+  # Estimate nax (average years lived in interval by those who die)
+  # Using Coale-Demeny approximations for age 0 and simplified UN for others
+  nax <- estimate_nax(nMx, ages, AgeInt, sex)
 
   # Replace NA interval width for open-ended group
   n <- AgeInt
-  n[is.na(n)] <- 25  # Assume 25-year open interval for calculation
+  n[is.na(n)] <- 1 / nMx[n_ages]  # Use 1/Mx for open interval (Keyfitz)
+  n[is.na(n) | is.infinite(n)] <- 25  # Fallback if Mx is 0
 
   # Calculate probability of death (Chiang's formula)
   nqx <- (n * nMx) / (1 + (n - nax) * nMx)
   nqx[n_ages] <- 1  # Terminal age group: everyone dies
   nqx[nqx > 1] <- 1
   nqx[nqx < 0] <- 0
+  nqx[is.na(nqx)] <- 0
 
   # Survival probability
   npx <- 1 - nqx
@@ -717,11 +693,17 @@ fallback_life_table <- function(nMx, ages, AgeInt) {
   # Person-years lived
   nLx <- n * lx - (n - nax) * ndx
 
+  # For open-ended interval, use Lx = lx / Mx
+  if (nMx[n_ages] > 0) {
+    nLx[n_ages] <- lx[n_ages] / nMx[n_ages]
+  }
+
   # Total person-years remaining
   Tx <- rev(cumsum(rev(nLx)))
 
   # Life expectancy
   ex <- Tx / lx
+  ex[is.na(ex) | is.infinite(ex)] <- 0
 
   list(
     Age = ages,
@@ -735,6 +717,62 @@ fallback_life_table <- function(nMx, ages, AgeInt) {
     Tx = Tx,
     ex = ex
   )
+}
+
+#' Estimate nax (average years lived in interval by those who die)
+#'
+#' Uses Coale-Demeny for infant mortality and simplified UN method for other ages.
+#'
+#' @param nMx Age-specific mortality rates
+#' @param ages Age group starts
+#' @param AgeInt Age interval widths
+#' @param sex Character: "m", "f", or "t"
+#' @return Numeric vector of nax values
+estimate_nax <- function(nMx, ages, AgeInt, sex = "t") {
+  n_ages <- length(ages)
+  nax <- rep(NA, n_ages)
+
+  for (i in 1:n_ages) {
+    age <- ages[i]
+    n <- if (is.na(AgeInt[i])) 5 else AgeInt[i]  # Default to 5 if NA
+
+    if (age == 0 && n == 1) {
+      # Infant mortality: Coale-Demeny coefficients
+      m0 <- nMx[1]
+      if (sex == "m") {
+        nax[i] <- if (m0 >= 0.107) 0.330 else 0.045 + 2.684 * m0
+      } else if (sex == "f") {
+        nax[i] <- if (m0 >= 0.107) 0.350 else 0.053 + 2.800 * m0
+      } else {
+        # Average of male and female
+        nax[i] <- if (m0 >= 0.107) 0.340 else 0.049 + 2.742 * m0
+      }
+    } else if (age == 1 && n == 4) {
+      # Ages 1-4: higher at beginning
+      nax[i] <- 1.5
+    } else if (i == n_ages) {
+      # Open-ended interval: use 1/Mx if available
+      if (nMx[i] > 0) {
+        nax[i] <- 1 / nMx[i]
+      } else {
+        nax[i] <- n / 2
+      }
+    } else {
+      # Standard: deaths distributed evenly through interval
+      nax[i] <- n / 2
+    }
+  }
+
+  # Handle any remaining NAs
+  nax[is.na(nax)] <- 2.5  # Default for 5-year groups
+
+  nax
+}
+
+#' Fallback life table (alias for backwards compatibility in tests)
+#' @inheritParams chiang_life_table
+fallback_life_table <- function(nMx, ages, AgeInt, sex = "t") {
+  chiang_life_table(nMx, ages, AgeInt, sex)
 }
 
 #' Apply STL decomposition to life expectancy series

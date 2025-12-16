@@ -11,7 +11,7 @@ This microservice provides HTTP endpoints for time series forecasting and statis
 ### Features
 
 - **Multiple Forecasting Methods**: Naive, mean, linear regression, exponential smoothing
-- **Life Table Calculation**: Life expectancy (e₀, e₆₅) via Chiang's method using DemoTools
+- **Life Table Calculation**: Life expectancy (e₀, e₆₅) via Chiang's method (pure R implementation)
 - **STL Decomposition**: Seasonal-trend decomposition for sub-yearly life expectancy data
 - **Seasonality Support**: Annual, quarterly, monthly, weekly data
 - **Cumulative Forecasting**: Special handling for cumulative annual data
@@ -29,7 +29,6 @@ This microservice provides HTTP endpoints for time series forecasting and statis
 - **fable** - Time series forecasting
 - **tsibble** - Time series data structures
 - **tidyverse** - Data manipulation
-- **DemoTools** - Demographic life table calculations (Chiang's method)
 - **Docker** - Containerization (r2u:22.04 base image)
 
 ## Quick Start
@@ -204,10 +203,10 @@ curl "http://localhost:5000/lt?deaths=500,1000,5000,10000;510,1020,5100,10200;49
 - Yearly data: No STL (returns null for trend/seasonal/adjusted)
 
 **Methodology:**
-Uses `DemoTools::lt_abridged()` with Chiang's method for abridged life tables. Key features:
-- **nax estimation**: UN method (handles infant mortality properly)
-- **85+ closure**: Kannisto model extrapolation (handles oldest-old mortality deceleration)
-- **Age extension**: Extrapolates from age 80 to age 110 (HMD standard)
+Pure R implementation of Chiang's method for abridged life tables. Key features:
+- **nax estimation**: Coale-Demeny coefficients for infant mortality, UN method for other ages
+- **85+ closure**: Keyfitz method (Lx = lx / Mx) for open-ended intervals
+- **No external dependencies**: Works in any R environment without compilation
 
 Age groups are automatically detected from the `ages` parameter - works with any standard format (5-year, 10-year, etc.).
 
