@@ -11,8 +11,6 @@ This microservice provides HTTP endpoints for time series forecasting and statis
 ### Features
 
 - **Multiple Forecasting Methods**: Naive, mean, linear regression, exponential smoothing
-- **Life Table Calculation**: Life expectancy (e₀, e₆₅) via Chiang's method (pure R implementation)
-- **STL Decomposition**: Seasonal-trend decomposition for sub-yearly life expectancy data
 - **Seasonality Support**: Annual, quarterly, monthly, weekly data
 - **Cumulative Forecasting**: Special handling for cumulative annual data
 - **Response Caching**: 1-hour TTL for identical requests
@@ -147,69 +145,6 @@ curl "http://localhost:5000/cum?y=1000,2100,3300,4600&h=2&t=1"
   "zscore": [-0.08, 0.15, -0.05, 0.12, 0.0, 0.0]
 }
 ```
-
-#### `GET /lt`
-
-Life table calculation for life expectancy estimation using Chiang's method.
-
-**Parameters:**
-- `deaths` (required): Deaths by age group
-  - Single period: comma-separated (e.g., `500,1000,5000,10000`)
-  - Multiple periods: semicolon-separated rows (e.g., `500,1000;510,1020;490,980`)
-- `population` (required): Population by age group (same format as deaths)
-- `ages` (required): Age group start values, comma-separated (e.g., `0,15,65,85`)
-- `period` (optional): Data period type, default `yearly`
-  - `yearly` = Annual data (no STL decomposition)
-  - `quarterly` = Quarterly data
-  - `monthly` = Monthly data
-  - `weekly` = Weekly data
-- `sex` (optional): Sex for nax estimation, default `t`
-  - `m` or `male` = Male
-  - `f` or `female` = Female
-  - `t` or `total` = Both sexes combined
-
-**Example Request (Single Period):**
-```bash
-curl "http://localhost:5000/lt?deaths=500,1000,5000,10000&population=1000000,3000000,800000,200000&ages=0,15,65,85"
-```
-
-**Response (Single Period):**
-```json
-{
-  "ages": [0, 15, 65, 85],
-  "ex": [78.5, 64.2, 18.2, 6.7],
-  "trend": null,
-  "seasonal": null,
-  "adjusted": null
-}
-```
-
-**Example Request (Multiple Monthly Periods):**
-```bash
-curl "http://localhost:5000/lt?deaths=500,1000,5000,10000;510,1020,5100,10200;490,980,4900,9800&population=1000000,3000000,800000,200000;1000000,3000000,800000,200000;1000000,3000000,800000,200000&ages=0,15,65,85&period=monthly"
-```
-
-**Response Fields:**
-- `ages`: Array of age group start values (matches input)
-- `ex`: Life expectancy at each age (single period only). Rounded to 2 decimal places.
-- `e0`: Life expectancy at birth array (multiple periods only, for STL). Rounded to 2 decimal places.
-- `trend`: STL trend component (only for sub-yearly data with 2+ years). Rounded to 2 decimal places.
-- `seasonal`: STL seasonal component. Rounded to 3 decimal places.
-- `adjusted`: Seasonally adjusted e0 values (e0 minus seasonal component). Rounded to 2 decimal places.
-
-**STL Decomposition Requirements:**
-- Monthly data: 24+ periods (2 years)
-- Weekly data: 104+ periods (2 years)
-- Quarterly data: 8+ periods (2 years)
-- Yearly data: No STL (returns null for trend/seasonal/adjusted)
-
-**Methodology:**
-Pure R implementation of Chiang's method for abridged life tables. Key features:
-- **nax estimation**: Coale-Demeny coefficients for infant mortality, UN method for other ages
-- **85+ closure**: Keyfitz method (Lx = lx / Mx) for open-ended intervals
-- **No external dependencies**: Works in any R environment without compilation
-
-Age groups are automatically detected from the `ages` parameter - works with any standard format (5-year, 10-year, etc.).
 
 ### Response Headers
 

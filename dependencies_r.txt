@@ -7,4 +7,3 @@ testthat
 sentryR
 httr
 jsonlite
-zoo
