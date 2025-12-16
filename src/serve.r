@@ -136,12 +136,72 @@ log_message <- function(level, message, details = NULL) {
   print(log_entry)
 }
 
+#' Validate life table request parameters
+#'
+#' @param query Query parameters from request
+#' @return List with valid=TRUE/FALSE and error message if invalid
+validate_life_table_request <- function(query) {
+  # Required: deaths (comma-separated or semicolon-separated for matrix)
+  if (is.null(query$deaths)) {
+    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'deaths'"))
+  }
+
+  # Required: population
+  if (is.null(query$population)) {
+    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'population'"))
+  }
+
+  # Required: ages (age group starts)
+  if (is.null(query$ages)) {
+    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'ages'"))
+  }
+
+  # Parse ages
+  ages <- tryCatch(
+    as.integer(strsplit(as.character(query$ages), ",")[[1]]),
+    error = function(e) NULL
+  )
+  if (is.null(ages) || any(is.na(ages))) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'ages' must be comma-separated integers"))
+  }
+  if (length(ages) < 2) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'ages' must have at least 2 age groups"))
+  }
+
+  # Validate period if provided
+  valid_periods <- c("yearly", "monthly", "weekly", "quarterly")
+  if (!is.null(query$period) && !query$period %in% valid_periods) {
+    return(list(
+      valid = FALSE,
+      status = 400,
+      message = paste("Parameter 'period' must be one of:", paste(valid_periods, collapse = ", "))
+    ))
+  }
+
+  # Validate sex if provided
+  valid_sex <- c("m", "f", "t", "male", "female", "total")
+  if (!is.null(query$sex) && !tolower(query$sex) %in% valid_sex) {
+    return(list(
+      valid = FALSE,
+      status = 400,
+      message = paste("Parameter 'sex' must be one of:", paste(valid_sex, collapse = ", "))
+    ))
+  }
+
+  return(list(valid = TRUE))
+}
+
 #' Validate request parameters
 #'
 #' @param query Query parameters from request
 #' @param path Request path
 #' @return List with valid=TRUE/FALSE and error message if invalid
 validate_request <- function(query, path) {
+  # Life table endpoint has different validation
+  if (path == "/lt") {
+    return(validate_life_table_request(query))
+  }
+
   # Check for required 'y' parameter
   if (is.null(query$y)) {
     return(list(valid = FALSE, status = 400, message = "Missing required parameter 'y'"))
@@ -392,9 +452,9 @@ app$on("request", function(server, request, ...) {
   }
 
   # Check if route exists (before parameter validation)
-  if (!request$path %in% c("/", "/cum")) {
+  if (!request$path %in% c("/", "/cum", "/lt")) {
     log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
-    return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
+    return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /lt, /health"))
   }
 
   # Validate request
@@ -425,35 +485,62 @@ app$on("request", function(server, request, ...) {
     return(response)
   }
 
-  # Parse parameters
-  y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
-  h <- as.integer(request$query$h %||% 1)
-  t <- as.integer(request$query$t %||% 0) == 1
-
-  # Parse baseline parameters: bs/be (new) or b (legacy)
-  bs <- NULL
-  be <- NULL
-  if (!is.null(request$query$bs) && !is.null(request$query$be)) {
-    bs <- as.integer(request$query$bs)
-    be <- as.integer(request$query$be)
-  } else if (!is.null(request$query$b)) {
-    # Legacy mode: bs=1, be=b
-    bs <- 1L
-    be <- as.integer(request$query$b)
-  }
-
-  # Parse xs (start time index) - optional
-  xs <- request$query$xs
-
   # Process request with error handling
   res <- tryCatch({
-    if (request$path == "/") {
-      m <- request$query$m
-      s <- as.integer(request$query$s)
-      handleForecast(y, h, m, s, t, bs, be, xs)
+    if (request$path == "/lt") {
+      # Life table endpoint - parse parameters differently
+      ages <- as.integer(strsplit(as.character(request$query$ages), ",")[[1]])
+      period <- request$query$period %||% "yearly"
+      sex <- request$query$sex %||% "t"
+
+      # Parse deaths and population
+      # Format: comma-separated for single period, semicolon-separated rows for matrix
+      deaths_str <- as.character(request$query$deaths)
+      pop_str <- as.character(request$query$population)
+
+      if (grepl(";", deaths_str)) {
+        # Matrix format: rows separated by semicolons, values by commas
+        deaths_rows <- strsplit(deaths_str, ";")[[1]]
+        pop_rows <- strsplit(pop_str, ";")[[1]]
+
+        deaths <- lapply(deaths_rows, function(row) as.double(strsplit(row, ",")[[1]]))
+        population <- lapply(pop_rows, function(row) as.double(strsplit(row, ",")[[1]]))
+      } else {
+        # Single period: comma-separated
+        deaths <- as.double(strsplit(deaths_str, ",")[[1]])
+        population <- as.double(strsplit(pop_str, ",")[[1]])
+      }
+
+      handleLifeTable(deaths, population, ages, period, sex)
     } else {
-      # request$path == "/cum" (already validated above)
-      handleCumulativeForecast(y, h, t, bs, be)
+      # Parse parameters for forecast endpoints
+      y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
+      h <- as.integer(request$query$h %||% 1)
+      t <- as.integer(request$query$t %||% 0) == 1
+
+      # Parse baseline parameters: bs/be (new) or b (legacy)
+      bs <- NULL
+      be <- NULL
+      if (!is.null(request$query$bs) && !is.null(request$query$be)) {
+        bs <- as.integer(request$query$bs)
+        be <- as.integer(request$query$be)
+      } else if (!is.null(request$query$b)) {
+        # Legacy mode: bs=1, be=b
+        bs <- 1L
+        be <- as.integer(request$query$b)
+      }
+
+      # Parse xs (start time index) - optional
+      xs <- request$query$xs
+
+      if (request$path == "/") {
+        m <- request$query$m
+        s <- as.integer(request$query$s)
+        handleForecast(y, h, m, s, t, bs, be, xs)
+      } else {
+        # request$path == "/cum" (already validated above)
+        handleCumulativeForecast(y, h, t, bs, be)
+      }
     }
   }, error = function(e) {
     log_message("ERROR", "Processing failed", list(

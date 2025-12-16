@@ -513,3 +513,291 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
     zscore = zscores
   )
 }
+
+#' Handle life table request
+#'
+#' Calculates life expectancy from age-specific mortality data using Chiang's method.
+#' Optionally applies STL decomposition for sub-yearly (monthly/weekly) data.
+#'
+#' @param deaths Matrix or list of vectors: deaths by age group for each time period
+#'   - For single period: numeric vector of length n_ages
+#'   - For multiple periods: list of vectors, or matrix (rows = ages, cols = periods)
+#' @param population Matrix or list of vectors: population by age group (same structure as deaths)
+#' @param ages Numeric vector of age group start values (e.g., c(0, 5, 10, ..., 85))
+#' @param period Character: "yearly", "monthly", "weekly", "quarterly"
+#' @param sex Character: "m" (male), "f" (female), or "t" (total/both)
+#'
+#' @return List with:
+#'   - e0: Life expectancy at birth (vector, one per period)
+#'   - e65: Life expectancy at age 65 (vector, one per period)
+#'   - trend: STL trend component (NULL if single period or insufficient data)
+#'   - seasonal: STL seasonal component (NULL if single period or insufficient data)
+#'   - adjusted: Seasonally adjusted e0 (NULL if single period or insufficient data)
+#'
+#' @details
+#' Uses DemoTools::LT() with Chiang's method for abridged life tables.
+#' Age groups can be any standard format (5-year, 10-year, etc.) - the function
+#' infers interval widths from the age starts.
+#'
+#' For STL decomposition:
+#' - Monthly data: requires 24+ periods (2 years)
+#' - Weekly data: requires 104+ periods (2 years)
+#' - Quarterly data: requires 8+ periods (2 years)
+#'
+#' @examples
+#' # Single year
+#' handleLifeTable(
+#'   deaths = c(500, 50, 30, 100, 500, 2000, 5000),
+#'   population = c(100000, 400000, 500000, 500000, 400000, 300000, 100000),
+#'   ages = c(0, 1, 15, 45, 65, 75, 85),
+#'   period = "yearly"
+#' )
+handleLifeTable <- function(deaths, population, ages, period = "yearly", sex = "t") {
+  library(DemoTools)
+
+  # Convert sex parameter to DemoTools format
+  sex_map <- c("m" = "m", "f" = "f", "t" = "t", "male" = "m", "female" = "f", "total" = "t")
+  sex_code <- sex_map[tolower(sex)]
+  if (is.na(sex_code)) sex_code <- "t"
+
+  # Determine if single period or multiple periods
+  is_single_period <- is.numeric(deaths) && !is.list(deaths) && is.null(dim(deaths))
+
+  if (is_single_period) {
+    # Single period: deaths and population are vectors
+    result <- build_single_life_table(deaths, population, ages, sex_code)
+    return(list(
+      e0 = result$e0,
+      e65 = result$e65,
+      trend = NULL,
+      seasonal = NULL,
+      adjusted = NULL
+    ))
+  }
+
+  # Multiple periods: convert to consistent format (list of vectors)
+  if (is.matrix(deaths)) {
+    # Matrix format: rows = ages, cols = periods
+    n_periods <- ncol(deaths)
+    deaths_list <- lapply(1:n_periods, function(i) deaths[, i])
+    pop_list <- lapply(1:n_periods, function(i) population[, i])
+  } else if (is.list(deaths)) {
+    # Already a list
+    deaths_list <- deaths
+    pop_list <- population
+    n_periods <- length(deaths_list)
+  } else {
+    stop("deaths must be a numeric vector, matrix, or list")
+  }
+
+  # Build life table for each period
+  e0_series <- numeric(n_periods)
+  e65_series <- numeric(n_periods)
+
+  for (i in 1:n_periods) {
+    result <- build_single_life_table(deaths_list[[i]], pop_list[[i]], ages, sex_code)
+    e0_series[i] <- result$e0
+    e65_series[i] <- result$e65
+  }
+
+  # Apply STL decomposition if enough data
+  stl_result <- apply_stl_decomposition(e0_series, period)
+
+  list(
+    e0 = round(e0_series, 2),
+    e65 = round(e65_series, 2),
+    trend = if (!is.null(stl_result$trend)) round(stl_result$trend, 2) else NULL,
+    seasonal = if (!is.null(stl_result$seasonal)) round(stl_result$seasonal, 3) else NULL,
+    adjusted = if (!is.null(stl_result$adjusted)) round(stl_result$adjusted, 2) else NULL
+  )
+}
+
+#' Build a single life table and extract key statistics
+#'
+#' @param deaths Numeric vector of deaths by age group
+#' @param population Numeric vector of population by age group
+#' @param ages Numeric vector of age group start values
+#' @param sex Character: "m", "f", or "t"
+#' @return List with e0, e65
+build_single_life_table <- function(deaths, population, ages, sex) {
+  # Calculate age-specific mortality rates
+  nMx <- deaths / population
+
+  # Handle edge cases: zero population or deaths
+  nMx[is.na(nMx) | is.infinite(nMx)] <- 0
+
+  # Build life table using DemoTools::lt_abridged()
+  # This function is specifically designed for abridged (grouped) life tables
+  # and handles 85+ closure properly via mortality extrapolation
+  lt <- tryCatch({
+    lt_abridged(
+      nMx = nMx,
+      Age = ages,
+      axmethod = "un",        # UN method for nax (handles infant mortality well)
+      Sex = sex,
+      extrapLaw = "kannisto", # Handles oldest-old mortality deceleration
+      extrapFrom = 80,        # Start extrapolation from age 80
+      OAnew = 110,            # Extend to age 110 (HMD standard)
+      radix = 100000
+    )
+  }, error = function(e) {
+    # Fallback: simpler calculation if DemoTools fails
+    warning(paste("DemoTools::lt_abridged failed, using fallback:", e$message))
+    n_ages <- length(ages)
+    AgeInt <- if (n_ages > 1) c(diff(ages), NA) else NA
+    return(fallback_life_table(nMx, ages, AgeInt))
+  })
+
+  # Extract life expectancies
+  e0 <- lt$ex[1]
+
+  # Find e65 (life expectancy at age 65)
+  # lt_abridged returns a data frame with Age column
+  if ("Age" %in% names(lt)) {
+    age_65_idx <- which(lt$Age == 65)
+    if (length(age_65_idx) == 0) {
+      age_65_idx <- which(lt$Age >= 65)[1]
+    }
+    e65 <- if (!is.na(age_65_idx) && age_65_idx <= length(lt$ex)) lt$ex[age_65_idx] else NA
+  } else {
+    # Fallback structure
+    age_65_idx <- which(ages == 65)
+    if (length(age_65_idx) == 0) {
+      age_65_idx <- which(ages >= 65)[1]
+    }
+    e65 <- if (!is.na(age_65_idx) && age_65_idx <= length(lt$ex)) lt$ex[age_65_idx] else NA
+  }
+
+  list(e0 = e0, e65 = e65)
+}
+
+#' Fallback life table calculation using Chiang's method directly
+#'
+#' Used when DemoTools::LT() fails (e.g., edge cases with sparse data)
+#'
+#' @param nMx Age-specific mortality rates
+#' @param ages Age group starts
+#' @param AgeInt Age interval widths
+#' @return List matching DemoTools::LT output structure
+fallback_life_table <- function(nMx, ages, AgeInt) {
+  n_ages <- length(ages)
+
+  # Default nax values (average years lived in interval by those who die)
+  nax <- rep(0.5, n_ages)
+  if (ages[1] == 0) {
+    nax[1] <- 0.1  # Infant mortality: deaths occur early in first year
+    if (n_ages > 1 && ages[2] <= 5) {
+      nax[2] <- 0.4  # Early childhood
+    }
+  }
+
+  # Replace NA interval width for open-ended group
+  n <- AgeInt
+  n[is.na(n)] <- 25  # Assume 25-year open interval for calculation
+
+  # Calculate probability of death (Chiang's formula)
+  nqx <- (n * nMx) / (1 + (n - nax) * nMx)
+  nqx[n_ages] <- 1  # Terminal age group: everyone dies
+  nqx[nqx > 1] <- 1
+  nqx[nqx < 0] <- 0
+
+  # Survival probability
+  npx <- 1 - nqx
+
+  # Survivors (radix = 100,000)
+  lx <- numeric(n_ages)
+  lx[1] <- 100000
+  for (i in 2:n_ages) {
+    lx[i] <- lx[i - 1] * npx[i - 1]
+  }
+
+  # Deaths
+  ndx <- lx * nqx
+
+  # Person-years lived
+  nLx <- n * lx - (n - nax) * ndx
+
+  # Total person-years remaining
+  Tx <- rev(cumsum(rev(nLx)))
+
+  # Life expectancy
+  ex <- Tx / lx
+
+  list(
+    Age = ages,
+    AgeInt = AgeInt,
+    nMx = nMx,
+    nax = nax,
+    nqx = nqx,
+    lx = lx,
+    ndx = ndx,
+    nLx = nLx,
+    Tx = Tx,
+    ex = ex
+  )
+}
+
+#' Apply STL decomposition to life expectancy series
+#'
+#' @param e0_series Numeric vector of e0 values over time
+#' @param period Character: "yearly", "monthly", "weekly", "quarterly"
+#' @return List with trend, seasonal, adjusted (all NULL if insufficient data)
+apply_stl_decomposition <- function(e0_series, period) {
+  # Determine frequency and minimum required periods
+  freq_map <- list(
+    "yearly" = 1,      # No seasonality for yearly
+    "quarterly" = 4,
+    "monthly" = 12,
+    "weekly" = 52
+  )
+
+  frequency <- freq_map[[period]]
+  if (is.null(frequency) || frequency == 1) {
+    # Yearly data: no seasonal decomposition
+    return(list(trend = NULL, seasonal = NULL, adjusted = NULL))
+  }
+
+  # Need at least 2 full cycles for STL
+  min_periods <- frequency * 2
+  if (length(e0_series) < min_periods) {
+    return(list(trend = NULL, seasonal = NULL, adjusted = NULL))
+  }
+
+  # Handle NA values - STL doesn't like them
+  if (any(is.na(e0_series))) {
+    # Simple interpolation for missing values
+    e0_clean <- zoo::na.approx(e0_series, na.rm = FALSE)
+    if (any(is.na(e0_clean))) {
+      # Still have NAs at edges, fill with nearest
+      e0_clean <- zoo::na.locf(zoo::na.locf(e0_clean, na.rm = FALSE), fromLast = TRUE, na.rm = FALSE)
+    }
+  } else {
+    e0_clean <- e0_series
+  }
+
+  # Create time series object
+  e0_ts <- ts(e0_clean, frequency = frequency)
+
+  # Apply STL decomposition
+  decomp <- tryCatch({
+    stl(e0_ts, s.window = "periodic")
+  }, error = function(e) {
+    warning(paste("STL decomposition failed:", e$message))
+    return(NULL)
+  })
+
+  if (is.null(decomp)) {
+    return(list(trend = NULL, seasonal = NULL, adjusted = NULL))
+  }
+
+  # Extract components
+  trend <- as.numeric(decomp$time.series[, "trend"])
+  seasonal <- as.numeric(decomp$time.series[, "seasonal"])
+  adjusted <- e0_series - seasonal
+
+  list(
+    trend = trend,
+    seasonal = seasonal,
+    adjusted = adjusted
+  )
+}

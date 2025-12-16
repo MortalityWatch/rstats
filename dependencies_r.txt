@@ -7,3 +7,5 @@ testthat
 sentryR
 httr
 jsonlite
+DemoTools
+zoo
