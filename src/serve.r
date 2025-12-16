@@ -167,6 +167,47 @@ validate_life_table_request <- function(query) {
   if (length(ages) < 2) {
     return(list(valid = FALSE, status = 400, message = "Parameter 'ages' must have at least 2 age groups"))
   }
+  n_ages <- length(ages)
+
+  # Validate deaths/population dimensions match ages
+  deaths_str <- as.character(query$deaths)
+  pop_str <- as.character(query$population)
+
+  if (grepl(";", deaths_str)) {
+    # Multiple periods - check all rows have consistent length
+    deaths_rows <- strsplit(deaths_str, ";")[[1]]
+    pop_rows <- strsplit(pop_str, ";")[[1]]
+
+    if (length(deaths_rows) != length(pop_rows)) {
+      return(list(valid = FALSE, status = 400,
+                  message = "deaths and population must have same number of periods (semicolon-separated rows)"))
+    }
+
+    for (i in seq_along(deaths_rows)) {
+      d_len <- length(strsplit(deaths_rows[i], ",")[[1]])
+      p_len <- length(strsplit(pop_rows[i], ",")[[1]])
+      if (d_len != n_ages) {
+        return(list(valid = FALSE, status = 400,
+                    message = sprintf("Period %d: deaths has %d values but ages has %d", i, d_len, n_ages)))
+      }
+      if (p_len != n_ages) {
+        return(list(valid = FALSE, status = 400,
+                    message = sprintf("Period %d: population has %d values but ages has %d", i, p_len, n_ages)))
+      }
+    }
+  } else {
+    # Single period
+    d_len <- length(strsplit(deaths_str, ",")[[1]])
+    p_len <- length(strsplit(pop_str, ",")[[1]])
+    if (d_len != n_ages) {
+      return(list(valid = FALSE, status = 400,
+                  message = sprintf("deaths has %d values but ages has %d", d_len, n_ages)))
+    }
+    if (p_len != n_ages) {
+      return(list(valid = FALSE, status = 400,
+                  message = sprintf("population has %d values but ages has %d", p_len, n_ages)))
+    }
+  }
 
   # Validate period if provided
   valid_periods <- c("yearly", "monthly", "weekly", "quarterly")

@@ -528,14 +528,15 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
 #' @param sex Character: "m" (male), "f" (female), or "t" (total/both)
 #'
 #' @return List with:
-#'   - e0: Life expectancy at birth (vector, one per period)
-#'   - e65: Life expectancy at age 65 (vector, one per period)
+#'   - ages: Input age group starts
+#'   - ex: Life expectancy at each age (single period only)
+#'   - e0: Life expectancy at birth series (multiple periods only)
 #'   - trend: STL trend component (NULL if single period or insufficient data)
 #'   - seasonal: STL seasonal component (NULL if single period or insufficient data)
 #'   - adjusted: Seasonally adjusted e0 (NULL if single period or insufficient data)
 #'
 #' @details
-#' Uses DemoTools::LT() with Chiang's method for abridged life tables.
+#' Pure R implementation of Chiang's method for abridged life tables.
 #' Age groups can be any standard format (5-year, 10-year, etc.) - the function
 #' infers interval widths from the age starts.
 #'
