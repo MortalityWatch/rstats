@@ -176,8 +176,8 @@ curl "http://localhost:5000/lt?deaths=500,1000,5000,10000&population=1000000,300
 **Response (Single Period):**
 ```json
 {
-  "e0": 78.5,
-  "e65": 18.2,
+  "ages": [0, 15, 65, 85],
+  "ex": [78.5, 64.2, 18.2, 6.7],
   "trend": null,
   "seasonal": null,
   "adjusted": null
@@ -190,8 +190,9 @@ curl "http://localhost:5000/lt?deaths=500,1000,5000,10000;510,1020,5100,10200;49
 ```
 
 **Response Fields:**
-- `e0`: Life expectancy at birth (single value or array for multiple periods). Rounded to 2 decimal places.
-- `e65`: Life expectancy at age 65 (single value or array). Rounded to 2 decimal places.
+- `ages`: Array of age group start values (matches input)
+- `ex`: Life expectancy at each age (single period only). Rounded to 2 decimal places.
+- `e0`: Life expectancy at birth array (multiple periods only, for STL). Rounded to 2 decimal places.
 - `trend`: STL trend component (only for sub-yearly data with 2+ years). Rounded to 2 decimal places.
 - `seasonal`: STL seasonal component. Rounded to 3 decimal places.
 - `adjusted`: Seasonally adjusted e0 values (e0 minus seasonal component). Rounded to 2 decimal places.

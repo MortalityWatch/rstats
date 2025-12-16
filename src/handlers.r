@@ -566,8 +566,8 @@ handleLifeTable <- function(deaths, population, ages, period = "yearly", sex = "
     # Single period: deaths and population are vectors
     result <- build_single_life_table(deaths, population, ages, sex_code)
     return(list(
-      e0 = result$e0,
-      e65 = result$e65,
+      ages = ages,
+      ex = round(result$ex, 2),
       trend = NULL,
       seasonal = NULL,
       adjusted = NULL
@@ -589,22 +589,20 @@ handleLifeTable <- function(deaths, population, ages, period = "yearly", sex = "
     stop("deaths must be a numeric vector, matrix, or list")
   }
 
-  # Build life table for each period
+  # Build life table for each period (extract e0 for STL decomposition)
   e0_series <- numeric(n_periods)
-  e65_series <- numeric(n_periods)
 
   for (i in 1:n_periods) {
     result <- build_single_life_table(deaths_list[[i]], pop_list[[i]], ages, sex_code)
-    e0_series[i] <- result$e0
-    e65_series[i] <- result$e65
+    e0_series[i] <- result$ex[1]  # e0 is first element
   }
 
   # Apply STL decomposition if enough data
   stl_result <- apply_stl_decomposition(e0_series, period)
 
   list(
+    ages = ages,
     e0 = round(e0_series, 2),
-    e65 = round(e65_series, 2),
     trend = if (!is.null(stl_result$trend)) round(stl_result$trend, 2) else NULL,
     seasonal = if (!is.null(stl_result$seasonal)) round(stl_result$seasonal, 3) else NULL,
     adjusted = if (!is.null(stl_result$adjusted)) round(stl_result$adjusted, 2) else NULL
@@ -620,7 +618,7 @@ handleLifeTable <- function(deaths, population, ages, period = "yearly", sex = "
 #' @param population Numeric vector of population by age group
 #' @param ages Numeric vector of age group start values
 #' @param sex Character: "m", "f", or "t" (used for nax estimation)
-#' @return List with e0, e65
+#' @return List with ex (life expectancy at each age)
 build_single_life_table <- function(deaths, population, ages, sex) {
   # Calculate age-specific mortality rates
   nMx <- deaths / population
@@ -635,17 +633,7 @@ build_single_life_table <- function(deaths, population, ages, sex) {
   # Build life table using Chiang's method
   lt <- chiang_life_table(nMx, ages, AgeInt, sex)
 
-  # Extract life expectancies
-  e0 <- lt$ex[1]
-
-  # Find e65 (life expectancy at age 65)
-  age_65_idx <- which(ages == 65)
-  if (length(age_65_idx) == 0) {
-    age_65_idx <- which(ages >= 65)[1]
-  }
-  e65 <- if (!is.na(age_65_idx) && age_65_idx <= length(lt$ex)) lt$ex[age_65_idx] else NA
-
-  list(e0 = e0, e65 = e65)
+  list(ex = lt$ex)
 }
 
 #' Chiang life table calculation

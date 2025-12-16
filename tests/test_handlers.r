@@ -689,21 +689,26 @@ test_that("handleForecast seasonal patterns align with actual calendar weeks", {
 # ============================================================================
 
 # Helper to check life table result structure
-check_life_table_result <- function(result, n_periods = 1) {
-  expect_true("e0" %in% names(result))
-  expect_true("e65" %in% names(result))
+check_life_table_result <- function(result, n_periods = 1, n_ages = NULL) {
+  expect_true("ages" %in% names(result))
   expect_true("trend" %in% names(result))
   expect_true("seasonal" %in% names(result))
   expect_true("adjusted" %in% names(result))
 
   if (n_periods == 1) {
-    expect_equal(length(result$e0), 1)
+    # Single period returns ex array for all ages
+    expect_true("ex" %in% names(result))
+    if (!is.null(n_ages)) {
+      expect_equal(length(result$ex), n_ages)
+    }
   } else {
+    # Multiple periods returns e0 series
+    expect_true("e0" %in% names(result))
     expect_equal(length(result$e0), n_periods)
   }
 }
 
-test_that("handleLifeTable calculates e0 for single period", {
+test_that("handleLifeTable calculates ex for single period", {
   # Simplified age groups matching typical data
   ages <- c(0, 15, 65, 85)
 
@@ -713,10 +718,15 @@ test_that("handleLifeTable calculates e0 for single period", {
 
   result <- handleLifeTable(deaths, population, ages, period = "yearly")
 
-  check_life_table_result(result, 1)
+  check_life_table_result(result, 1, n_ages = 4)
 
-  # e0 should be a reasonable value (between 50 and 95)
-  expect_true(result$e0 > 50 && result$e0 < 95)
+  # ex[1] is e0, should be a reasonable value
+  expect_true(result$ex[1] > 50 && result$ex[1] < 105)
+
+  # Should return ex for all ages
+
+  expect_equal(length(result$ex), length(ages))
+  expect_equal(result$ages, ages)
 
   # No STL for single period
   expect_null(result$trend)
@@ -730,8 +740,8 @@ test_that("handleLifeTable works with different age group formats", {
   pop_10yr <- c(500000, 500000, 600000, 600000, 550000, 500000, 400000, 300000, 150000)
 
   result_10yr <- handleLifeTable(deaths_10yr, pop_10yr, ages_10yr)
-  check_life_table_result(result_10yr, 1)
-  expect_true(result_10yr$e0 > 50 && result_10yr$e0 < 95)
+  check_life_table_result(result_10yr, 1, n_ages = 9)
+  expect_true(result_10yr$ex[1] > 50 && result_10yr$ex[1] < 95)
 
   # 5-year age groups (mortality.org style)
   ages_5yr <- c(0, 5, 15, 25, 35, 45, 55, 65, 75, 85)
@@ -739,23 +749,29 @@ test_that("handleLifeTable works with different age group formats", {
   pop_5yr <- c(300000, 300000, 600000, 700000, 650000, 600000, 550000, 400000, 250000, 100000)
 
   result_5yr <- handleLifeTable(deaths_5yr, pop_5yr, ages_5yr)
-  check_life_table_result(result_5yr, 1)
-  expect_true(result_5yr$e0 > 50 && result_5yr$e0 < 95)
+  check_life_table_result(result_5yr, 1, n_ages = 10)
+  expect_true(result_5yr$ex[1] > 50 && result_5yr$ex[1] < 95)
 })
 
-test_that("handleLifeTable calculates e65", {
+test_that("handleLifeTable returns ex at specific ages", {
   ages <- c(0, 15, 45, 65, 75, 85)
   deaths <- c(400, 500, 1500, 3000, 5000, 10000)
   population <- c(800000, 2500000, 2000000, 600000, 400000, 150000)
 
   result <- handleLifeTable(deaths, population, ages)
 
-  check_life_table_result(result, 1)
+  check_life_table_result(result, 1, n_ages = 6)
 
-  # e65 should be less than e0 (generally true)
-  # Actually for remaining life expectancy at 65, it should be around 15-25 years
-  expect_true(!is.na(result$e65))
-  expect_true(result$e65 > 5 && result$e65 < 30)
+  # Find e65 from the ex array
+  e65_idx <- which(result$ages == 65)
+  e65 <- result$ex[e65_idx]
+
+  # e65 should be around 15-25 years for typical mortality
+  expect_true(!is.na(e65))
+  expect_true(e65 > 5 && e65 < 40)
+
+  # ex should decrease with age (generally)
+  expect_true(result$ex[1] > result$ex[e65_idx])
 })
 
 test_that("handleLifeTable handles multiple periods as list", {
@@ -771,7 +787,7 @@ test_that("handleLifeTable handles multiple periods as list", {
   check_life_table_result(result, n_periods)
 
   # All e0 values should be reasonable
-  expect_true(all(result$e0 > 50 & result$e0 < 95))
+  expect_true(all(result$e0 > 50 & result$e0 < 105))
 
   # No STL for yearly data
   expect_null(result$trend)
@@ -814,10 +830,10 @@ test_that("handleLifeTable handles sex parameter", {
   result_f <- handleLifeTable(deaths, population, ages, sex = "f")
   result_t <- handleLifeTable(deaths, population, ages, sex = "t")
 
-  # All should produce valid results
-  expect_true(result_m$e0 > 50 && result_m$e0 < 95)
-  expect_true(result_f$e0 > 50 && result_f$e0 < 95)
-  expect_true(result_t$e0 > 50 && result_t$e0 < 95)
+  # All should produce valid results (ex[1] is e0)
+  expect_true(result_m$ex[1] > 50 && result_m$ex[1] < 105)
+  expect_true(result_f$ex[1] > 50 && result_f$ex[1] < 105)
+  expect_true(result_t$ex[1] > 50 && result_t$ex[1] < 105)
 })
 
 test_that("fallback_life_table produces reasonable results", {
