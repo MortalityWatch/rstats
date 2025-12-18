@@ -379,7 +379,7 @@ test_that("handleCumulativeForecast works with trend", {
   expect_true("upper" %in% names(result))
   expect_true("zscore" %in% names(result))
 
-  # Should return incremental values (uncumulated)
+  # Should return cumulative values
   expect_true(all(!is.na(result$y[1:length(y)])))
 })
 
@@ -392,6 +392,68 @@ test_that("handleCumulativeForecast works without trend", {
 
   expect_true("y" %in% names(result))
   expect_equal(length(result$zscore), length(y) + h)
+})
+
+test_that("handleCumulativeForecast returns cumulative baseline values", {
+  # Issue #14: Baseline should accumulate, not be flat
+  # With a constant mean baseline of 466.175, output should be:
+  # Period 1: 466.175, Period 2: 932.35, Period 3: 1398.53, etc.
+  y <- c(470.7, 471.5, 464.1, 458.4, 520.7, 571.2, 494.7, 456.3, 434.1)
+  h <- 1
+  t <- FALSE
+
+  result <- handleCumulativeForecast(y, h, t, bs = 1, be = 4)
+
+  # Baseline values (first 4) should be cumulative (strictly increasing)
+  baseline_y <- result$y[1:4]
+  expect_true(all(diff(baseline_y) > 0), info = "Baseline values should be strictly increasing (cumulative)")
+
+  # Each subsequent baseline value should be roughly the first + increments
+  # (not flat/repeated values)
+  expect_true(baseline_y[2] > baseline_y[1] * 1.5, info = "Second baseline should be > 1.5x first (cumulative)")
+  expect_true(baseline_y[4] > baseline_y[1] * 3, info = "Fourth baseline should be > 3x first (cumulative)")
+})
+
+test_that("handleCumulativeForecast returns cumulative post-baseline values", {
+  # Post-baseline values should continue cumulating from baseline total
+  y <- c(100, 100, 100, 100, 100, 100)  # Constant values
+  h <- 2
+  t <- FALSE
+
+  result <- handleCumulativeForecast(y, h, t, bs = 1, be = 4)
+
+  # With constant baseline of 100:
+  # Baseline cumulative: 100, 200, 300, 400
+  # Post-baseline (periods 5,6): should be ~500, ~600
+  # Forecast: should be ~700, ~800
+  expect_equal(result$y[1], 100, tolerance = 1)
+  expect_equal(result$y[2], 200, tolerance = 1)
+  expect_equal(result$y[3], 300, tolerance = 1)
+  expect_equal(result$y[4], 400, tolerance = 1)
+  expect_equal(result$y[5], 500, tolerance = 1)  # First post-baseline
+  expect_equal(result$y[6], 600, tolerance = 1)  # Second post-baseline
+  expect_equal(result$y[7], 700, tolerance = 1)  # First forecast
+  expect_equal(result$y[8], 800, tolerance = 1)  # Second forecast
+})
+
+test_that("handleCumulativeForecast prediction intervals widen over time", {
+  # Issue #14: Prediction intervals should widen as uncertainty accumulates
+  y <- c(100, 100, 100, 100, 120, 110, 130, 140)
+  h <- 3
+  t <- FALSE
+
+  result <- handleCumulativeForecast(y, h, t, bs = 1, be = 4)
+
+  # Post-baseline lower/upper bounds should exist
+  post_lower <- result$lower[5:length(result$lower)]
+  post_upper <- result$upper[5:length(result$upper)]
+
+  expect_true(all(!is.na(post_lower)), info = "Post-baseline lower bounds should not be NA")
+  expect_true(all(!is.na(post_upper)), info = "Post-baseline upper bounds should not be NA")
+
+  # Prediction interval width should increase over time
+  interval_widths <- post_upper - post_lower
+  expect_true(all(diff(interval_widths) >= 0), info = "PI widths should increase or stay same over time")
 })
 
 test_that("handleCumulativeForecast with bs/be", {
