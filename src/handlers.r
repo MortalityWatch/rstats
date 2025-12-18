@@ -497,19 +497,35 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
   )
 
   # Combine all results with PI for post-baseline and beyond
-  # Convert cumulative forecasts back to incremental values
-  post_y <- if (nrow(post_baseline_result) > 0) uncumulate(post_baseline_result$asmr) else numeric(0)
-  post_lower <- if (nrow(post_baseline_result) > 0) uncumulate(post_baseline_result$lower) else numeric(0)
-  post_upper <- if (nrow(post_baseline_result) > 0) uncumulate(post_baseline_result$upper) else numeric(0)
+  # Keep cumulative values (cumForecastN already returns cumulative sums)
 
-  beyond_y <- if (nrow(fc_beyond_result) > 0) uncumulate(fc_beyond_result$asmr) else numeric(0)
-  beyond_lower <- if (nrow(fc_beyond_result) > 0) uncumulate(fc_beyond_result$lower) else numeric(0)
-  beyond_upper <- if (nrow(fc_beyond_result) > 0) uncumulate(fc_beyond_result$upper) else numeric(0)
+  # Calculate cumulative baseline
+  baseline_cumulative <- cumsum(bl$.mean)
+  baseline_total <- sum(bl$.mean)
+
+  # Pre-baseline: cumulative sum of predictions
+  pre_cumulative <- if (n_pre_baseline > 0) cumsum(pre_baseline_predicted) else numeric(0)
+  pre_total <- if (n_pre_baseline > 0) sum(pre_baseline_predicted) else 0
+
+  # Post-baseline: cumForecastN returns cumulative sums from baseline end,
+  # add baseline+pre total to get full cumulative
+  cumulative_offset <- baseline_total + pre_total
+  post_y <- if (nrow(post_baseline_result) > 0) post_baseline_result$asmr + cumulative_offset else numeric(0)
+  post_lower <- if (nrow(post_baseline_result) > 0) post_baseline_result$lower + cumulative_offset else numeric(0)
+  post_upper <- if (nrow(post_baseline_result) > 0) post_baseline_result$upper + cumulative_offset else numeric(0)
+
+  # Beyond: same treatment as post-baseline
+  beyond_y <- if (nrow(fc_beyond_result) > 0) fc_beyond_result$asmr + cumulative_offset else numeric(0)
+  beyond_lower <- if (nrow(fc_beyond_result) > 0) fc_beyond_result$lower + cumulative_offset else numeric(0)
+  beyond_upper <- if (nrow(fc_beyond_result) > 0) fc_beyond_result$upper + cumulative_offset else numeric(0)
+
+  # Adjust baseline cumulative to include pre-baseline total
+  baseline_cumulative_adjusted <- baseline_cumulative + pre_total
 
   list(
-    y = c(pre_baseline_predicted, bl$.mean, post_y, beyond_y),
-    lower = c(rep(NA, n_pre_baseline + nrow(bl)), post_lower, beyond_lower),
-    upper = c(rep(NA, n_pre_baseline + nrow(bl)), post_upper, beyond_upper),
+    y = round(c(pre_cumulative, baseline_cumulative_adjusted, post_y, beyond_y), 2),
+    lower = round(c(rep(NA, n_pre_baseline + nrow(bl)), post_lower, beyond_lower), 2),
+    upper = round(c(rep(NA, n_pre_baseline + nrow(bl)), post_upper, beyond_upper), 2),
     zscore = zscores
   )
 }
