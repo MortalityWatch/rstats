@@ -445,4 +445,20 @@ test_that("Baseline with insufficient non-NA values returns 400", {
   expect_match(body2$error, "only 2 non-NA values")
 })
 
+test_that("Valueless query parameters are handled gracefully", {
+  skip_if_no_server()
+
+  # Test with a valueless param appended to a valid request (e.g., &foo instead of &foo=bar)
+  # This can happen when users add cache-busting params incorrectly
+  url <- paste0(BASE_URL, "/?y=100,105,110,115,120&s=1&m=mean&cachebust")
+  response <- GET(url)
+
+  expect_equal(status_code(response), 200)
+
+  body <- content(response, as = "parsed")
+  expect_true("y" %in% names(body))
+  expect_true("lower" %in% names(body))
+  expect_true("upper" %in% names(body))
+})
+
 message("\nIntegration tests completed successfully!")
