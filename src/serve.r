@@ -344,6 +344,7 @@ send_error <- function(server, request, status, message) {
   response$body <- jsonlite::toJSON(list(error = message, status = status), auto_unbox = TRUE)
   response$status <- status
   response$type <- "json"
+  response$set_header("Cache-Control", "no-store")
   return(response)
 }
 
