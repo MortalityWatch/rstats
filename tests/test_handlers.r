@@ -456,6 +456,26 @@ test_that("handleCumulativeForecast prediction intervals widen over time", {
   expect_true(all(diff(interval_widths) >= 0), info = "PI widths should increase or stay same over time")
 })
 
+test_that("handleCumulativeForecast y values are within prediction interval bounds", {
+  # Ensure y is always within [lower, upper] where bounds exist
+  y <- c(470.7, 471.5, 464.1, 458.4, 520.7, 571.2, 494.7, 456.3, 434.1)
+  h <- 2
+  t <- FALSE
+
+  result <- handleCumulativeForecast(y, h, t, bs = 1, be = 4)
+
+  # Check that y is within bounds where they exist
+  has_bounds <- !is.na(result$lower) & !is.na(result$upper)
+  y_with_bounds <- result$y[has_bounds]
+  lower_bounds <- result$lower[has_bounds]
+  upper_bounds <- result$upper[has_bounds]
+
+  expect_true(all(y_with_bounds >= lower_bounds),
+    info = "y values must be >= lower bound")
+  expect_true(all(y_with_bounds <= upper_bounds),
+    info = "y values must be <= upper bound")
+})
+
 test_that("handleCumulativeForecast with bs/be", {
   y <- c(1000, 2100, 3300, 4600, 6000, 7500)
   h <- 2

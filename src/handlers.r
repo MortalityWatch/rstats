@@ -522,10 +522,25 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
   # Adjust baseline cumulative to include pre-baseline total
   baseline_cumulative_adjusted <- baseline_cumulative + pre_total
 
+  # Build result vectors
+  result_y <- round(c(pre_cumulative, baseline_cumulative_adjusted, post_y, beyond_y), 2)
+  result_lower <- round(c(rep(NA, n_pre_baseline + nrow(bl)), post_lower, beyond_lower), 2)
+  result_upper <- round(c(rep(NA, n_pre_baseline + nrow(bl)), post_upper, beyond_upper), 2)
+
+  # Validate: y must be within [lower, upper] where bounds exist
+  has_bounds <- !is.na(result_lower) & !is.na(result_upper)
+  if (any(has_bounds)) {
+    y_below_lower <- result_y[has_bounds] < result_lower[has_bounds]
+    y_above_upper <- result_y[has_bounds] > result_upper[has_bounds]
+    if (any(y_below_lower) || any(y_above_upper)) {
+      stop("Internal error: predicted y values outside prediction interval bounds")
+    }
+  }
+
   list(
-    y = round(c(pre_cumulative, baseline_cumulative_adjusted, post_y, beyond_y), 2),
-    lower = round(c(rep(NA, n_pre_baseline + nrow(bl)), post_lower, beyond_lower), 2),
-    upper = round(c(rep(NA, n_pre_baseline + nrow(bl)), post_upper, beyond_upper), 2),
+    y = result_y,
+    lower = result_lower,
+    upper = result_upper,
     zscore = zscores
   )
 }
