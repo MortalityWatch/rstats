@@ -53,7 +53,9 @@ CACHE_TTL <- 3600 # 1 hour in seconds
 generate_cache_key <- function(path, query) {
   # Sort query parameters for consistent keys
   sorted_params <- query[order(names(query))]
-  param_str <- paste(sprintf("%s=%s", names(sorted_params), unlist(sorted_params)), collapse = "&")
+  # Handle NULL values from valueless params (e.g., &foo instead of &foo=bar)
+  param_values <- sapply(sorted_params, function(x) if (is.null(x)) "" else as.character(x))
+  param_str <- paste(sprintf("%s=%s", names(sorted_params), param_values), collapse = "&")
   paste0(path, "?", param_str)
 }
 
@@ -362,6 +364,7 @@ app$on("request", function(server, request, ...) {
     ip = client_ip,
     params = paste(sprintf("%s=%s", names(request$query),
                           sapply(request$query, function(x) {
+                            if (is.null(x)) return("")
                             s <- as.character(x)
                             if (nchar(s) > 50) paste0(substr(s, 1, 47), "...") else s
                           })), collapse = ", ")
