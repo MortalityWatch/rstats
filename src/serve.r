@@ -459,6 +459,17 @@ app$on("request", function(server, request, ...) {
                           })), collapse = ", ")
   ))
 
+  # Handle CORS preflight (OPTIONS) requests
+  # Browsers send OPTIONS before cross-origin requests - skip validation
+  if (toupper(request$method) == "OPTIONS") {
+    response <- request$respond()
+    response$status <- 200L
+    response$body <- ""
+    # CORS headers are added by fiery/routr middleware or proxy
+    log_message("INFO", "CORS preflight", list(path = request$path, ip = client_ip))
+    return(response)
+  }
+
   # Health check endpoint
   if (request$path == "/health") {
     response <- request$respond()
