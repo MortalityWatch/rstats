@@ -370,28 +370,40 @@ send_error <- function(server, request, status, message) {
 
 #' Parse request body for POST requests
 #'
-#' @param request Request object
+#' @param request Request object (reqres::Request)
 #' @return List of parsed body parameters, or NULL if not a POST request
 parse_post_body <- function(request) {
-  if (request$method != "POST") {
+  # Method may be lowercase (post) or uppercase (POST) depending on server
+  if (toupper(request$method) != "POST") {
     return(NULL)
   }
 
-  body <- request$body
-  if (is.null(body) || length(body) == 0) {
-    return(NULL)
-  }
-
-  # Convert raw body to string if needed
-  if (is.raw(body)) {
-    body <- rawToChar(body)
-  }
-
-  # Parse JSON body
+  # In reqres, must call parse() before accessing body
+  # Use reqres::parse_json() with simplifyVector = FALSE to preserve arrays as lists
   tryCatch({
-    jsonlite::fromJSON(body, simplifyVector = FALSE)
+    request$parse(
+      `application/json` = reqres::parse_json(simplifyVector = FALSE),
+      autofail = FALSE
+    )
+    body <- request$body
+    if (is.null(body) || length(body) == 0 || identical(body, "")) {
+      return(NULL)
+    }
+    body
   }, error = function(e) {
-    NULL
+    # Fallback: try to read raw body directly from origin rook object
+    tryCatch({
+      rook <- request$origin
+      if (!is.null(rook) && !is.null(rook$rook.input)) {
+        raw_body <- rook$rook.input$read()
+        if (!is.null(raw_body) && length(raw_body) > 0) {
+          return(jsonlite::fromJSON(rawToChar(raw_body), simplifyVector = FALSE))
+        }
+      }
+      NULL
+    }, error = function(e2) {
+      NULL
+    })
   })
 }
 
@@ -437,7 +449,12 @@ app$on("request", function(server, request, ...) {
     params = paste(sprintf("%s=%s", names(merged_params),
                           sapply(merged_params, function(x) {
                             if (is.null(x)) return("")
-                            s <- as.character(x)
+                            # Handle lists/arrays by converting to string representation
+                            s <- if (is.list(x) || length(x) > 1) {
+                              paste0("[", length(x), " items]")
+                            } else {
+                              as.character(x)
+                            }
                             if (nchar(s) > 50) paste0(substr(s, 1, 47), "...") else s
                           })), collapse = ", ")
   ))
