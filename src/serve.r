@@ -370,28 +370,31 @@ send_error <- function(server, request, status, message) {
 
 #' Parse request body for POST requests
 #'
-#' @param request Request object
+#' @param request Request object (reqres::Request)
 #' @return List of parsed body parameters, or NULL if not a POST request
 parse_post_body <- function(request) {
   if (request$method != "POST") {
     return(NULL)
   }
 
-  body <- request$body
-  if (is.null(body) || length(body) == 0) {
-    return(NULL)
-  }
-
-  # Convert raw body to string if needed
-  if (is.raw(body)) {
-    body <- rawToChar(body)
-  }
-
-  # Parse JSON body
+  # In reqres, must call parse() before accessing body
+  # Use a custom JSON parser since we want simplifyVector = FALSE
   tryCatch({
-    jsonlite::fromJSON(body, simplifyVector = FALSE)
+    request$parse(json = function(raw, ...) {
+      jsonlite::fromJSON(rawToChar(raw), simplifyVector = FALSE)
+    })
+    request$body
   }, error = function(e) {
-    NULL
+    # Fallback: try to read raw body directly
+    tryCatch({
+      raw_body <- request$rook.input$read()
+      if (is.null(raw_body) || length(raw_body) == 0) {
+        return(NULL)
+      }
+      jsonlite::fromJSON(rawToChar(raw_body), simplifyVector = FALSE)
+    }, error = function(e2) {
+      NULL
+    })
   })
 }
 
