@@ -348,9 +348,6 @@ git push dokku master
 
 # Enable CORS
 dokku nginx-cors:enable stats-mortality-watch
-
-# Enable caching
-dokku nginx-cache:enable stats-mortality-watch
 ```
 
 **Port Configuration:**
