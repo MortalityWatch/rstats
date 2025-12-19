@@ -48,13 +48,21 @@ CACHE_TTL <- 3600 # 1 hour in seconds
 #' Generate cache key from request parameters
 #'
 #' @param path Request path
-#' @param query Query parameters
+#' @param query Query parameters (may include arrays from POST body)
 #' @return String cache key
 generate_cache_key <- function(path, query) {
   # Sort query parameters for consistent keys
   sorted_params <- query[order(names(query))]
-  # Handle NULL values from valueless params (e.g., &foo instead of &foo=bar)
-  param_values <- sapply(sorted_params, function(x) if (is.null(x)) "" else as.character(x))
+  # Handle NULL values and arrays (convert arrays to comma-separated strings)
+  param_values <- sapply(sorted_params, function(x) {
+    if (is.null(x)) {
+      ""
+    } else if (is.list(x) || (is.numeric(x) && length(x) > 1)) {
+      paste(as.character(unlist(x)), collapse = ",")
+    } else {
+      as.character(x)
+    }
+  })
   param_str <- paste(sprintf("%s=%s", names(sorted_params), param_values), collapse = "&")
   paste0(path, "?", param_str)
 }
@@ -140,7 +148,7 @@ log_message <- function(level, message, details = NULL) {
 
 #' Validate request parameters
 #'
-#' @param query Query parameters from request
+#' @param query Query parameters from request (may include POST body params)
 #' @param path Request path
 #' @return List with valid=TRUE/FALSE and error message if invalid
 validate_request <- function(query, path) {
@@ -150,13 +158,20 @@ validate_request <- function(query, path) {
   }
 
   # Validate 'y' can be parsed as numeric
-  y <- tryCatch(
-    as.double(strsplit(as.character(query$y), ",")[[1]]),
-    error = function(e) NULL
-  )
+  # Handle both comma-separated string (GET) and numeric array (POST)
+  y_param <- query$y
+  y <- tryCatch({
+    if (is.character(y_param)) {
+      as.double(strsplit(as.character(y_param), ",")[[1]])
+    } else if (is.list(y_param) || is.numeric(y_param)) {
+      as.double(unlist(y_param))
+    } else {
+      as.double(y_param)
+    }
+  }, error = function(e) NULL)
 
   if (is.null(y)) {
-    return(list(valid = FALSE, status = 400, message = "Parameter 'y' must be comma-separated numeric values"))
+    return(list(valid = FALSE, status = 400, message = "Parameter 'y' must be comma-separated numeric values or a numeric array"))
   }
 
   # Check minimum data points
@@ -350,6 +365,54 @@ send_error <- function(server, request, status, message) {
   return(response)
 }
 
+#' Parse request body for POST requests
+#'
+#' @param request Request object
+#' @return List of parsed body parameters, or NULL if not a POST request
+parse_post_body <- function(request) {
+  if (request$method != "POST") {
+    return(NULL)
+  }
+
+  body <- request$body
+  if (is.null(body) || length(body) == 0) {
+    return(NULL)
+  }
+
+  # Convert raw body to string if needed
+  if (is.raw(body)) {
+    body <- rawToChar(body)
+  }
+
+  # Parse JSON body
+  tryCatch({
+    jsonlite::fromJSON(body, simplifyVector = FALSE)
+  }, error = function(e) {
+    NULL
+  })
+}
+
+#' Merge POST body params with query params (POST body takes precedence for 'y')
+#'
+#' @param query Query parameters from URL
+#' @param body_params Parsed body parameters from POST
+#' @return Merged parameters list
+merge_request_params <- function(query, body_params) {
+  if (is.null(body_params)) {
+    return(query)
+  }
+
+  # Start with query params
+  params <- query
+
+  # Override/add from body params
+  for (name in names(body_params)) {
+    params[[name]] <- body_params[[name]]
+  }
+
+  params
+}
+
 # Main request handler
 app$on("request", function(server, request, ...) {
   start_time <- Sys.time()
@@ -357,13 +420,19 @@ app$on("request", function(server, request, ...) {
   # Extract client IP (consider X-Forwarded-For for proxied requests)
   client_ip <- request$REMOTE_ADDR %||% "unknown"
 
+  # Parse POST body if present
+  body_params <- parse_post_body(request)
+
+  # Merge query params with body params (body takes precedence for large data like 'y')
+  merged_params <- merge_request_params(request$query, body_params)
+
   # Log incoming request
   log_message("INFO", "Incoming request", list(
     path = request$path,
     method = request$method,
     ip = client_ip,
-    params = paste(sprintf("%s=%s", names(request$query),
-                          sapply(request$query, function(x) {
+    params = paste(sprintf("%s=%s", names(merged_params),
+                          sapply(merged_params, function(x) {
                             if (is.null(x)) return("")
                             s <- as.character(x)
                             if (nchar(s) > 50) paste0(substr(s, 1, 47), "...") else s
@@ -401,8 +470,8 @@ app$on("request", function(server, request, ...) {
     return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
   }
 
-  # Validate request
-  validation <- validate_request(request$query, request$path)
+  # Validate request (use merged params for POST support)
+  validation <- validate_request(merged_params, request$path)
   if (!validation$valid) {
     log_message("WARN", "Validation failed", list(
       ip = client_ip,
@@ -411,8 +480,8 @@ app$on("request", function(server, request, ...) {
     return(send_error(server, request, validation$status, validation$message))
   }
 
-  # Check cache for non-health endpoints
-  cache_key <- generate_cache_key(request$path, request$query)
+  # Check cache for non-health endpoints (use merged params for cache key)
+  cache_key <- generate_cache_key(request$path, merged_params)
   cached_result <- get_cached_response(cache_key)
 
   if (!is.null(cached_result)) {
@@ -429,31 +498,40 @@ app$on("request", function(server, request, ...) {
     return(response)
   }
 
-  # Parse parameters
-  y <- as.double(strsplit(as.character(request$query$y), ",")[[1]])
-  h <- as.integer(request$query$h %||% 1)
-  t <- as.integer(request$query$t %||% 0) == 1
+  # Parse parameters (use merged_params for POST support)
+  # Handle 'y' as either comma-separated string (GET) or numeric array (POST)
+  y_param <- merged_params$y
+  if (is.character(y_param)) {
+    y <- as.double(strsplit(as.character(y_param), ",")[[1]])
+  } else if (is.list(y_param) || is.numeric(y_param)) {
+    y <- as.double(unlist(y_param))
+  } else {
+    y <- as.double(y_param)
+  }
+
+  h <- as.integer(merged_params$h %||% 1)
+  t <- as.integer(merged_params$t %||% 0) == 1
 
   # Parse baseline parameters: bs/be (new) or b (legacy)
   bs <- NULL
   be <- NULL
-  if (!is.null(request$query$bs) && !is.null(request$query$be)) {
-    bs <- as.integer(request$query$bs)
-    be <- as.integer(request$query$be)
-  } else if (!is.null(request$query$b)) {
+  if (!is.null(merged_params$bs) && !is.null(merged_params$be)) {
+    bs <- as.integer(merged_params$bs)
+    be <- as.integer(merged_params$be)
+  } else if (!is.null(merged_params$b)) {
     # Legacy mode: bs=1, be=b
     bs <- 1L
-    be <- as.integer(request$query$b)
+    be <- as.integer(merged_params$b)
   }
 
   # Parse xs (start time index) - optional
-  xs <- request$query$xs
+  xs <- merged_params$xs
 
   # Process request with error handling
   res <- tryCatch({
     if (request$path == "/") {
-      m <- request$query$m
-      s <- as.integer(request$query$s)
+      m <- merged_params$m
+      s <- as.integer(merged_params$s)
       handleForecast(y, h, m, s, t, bs, be, xs)
     } else {
       # request$path == "/cum" (already validated above)
@@ -471,7 +549,7 @@ app$on("request", function(server, request, ...) {
       extra = list(
         path = request$path,
         method = request$method,
-        query = paste(names(request$query), unlist(request$query), sep = "=", collapse = "&"),
+        query = paste(names(merged_params), unlist(merged_params), sep = "=", collapse = "&"),
         ip = client_ip
       ),
       tags = list(
