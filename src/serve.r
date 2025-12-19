@@ -57,7 +57,7 @@ generate_cache_key <- function(path, query) {
   param_values <- sapply(sorted_params, function(x) {
     if (is.null(x)) {
       ""
-    } else if (is.list(x) || (is.numeric(x) && length(x) > 1)) {
+    } else if (is.list(x) || is.numeric(x)) {
       paste(as.character(unlist(x)), collapse = ",")
     } else {
       as.character(x)
@@ -171,7 +171,10 @@ validate_request <- function(query, path) {
   }, error = function(e) NULL)
 
   if (is.null(y)) {
-    return(list(valid = FALSE, status = 400, message = "Parameter 'y' must be comma-separated numeric values or a numeric array"))
+    return(list(
+      valid = FALSE, status = 400,
+      message = "Parameter 'y' must be comma-separated numeric values or a numeric array"
+    ))
   }
 
   # Check minimum data points
