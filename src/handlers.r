@@ -508,8 +508,9 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
   pre_total <- if (n_pre_baseline > 0) sum(pre_baseline_predicted) else 0
 
   # Post-baseline: cumForecastN returns cumulative sums from baseline end,
-  # add baseline+pre total to get full cumulative
-  cumulative_offset <- baseline_total + pre_total
+  # add only baseline total (NOT pre_total) for proper excess mortality calculation
+  # Pre-baseline predictions should not inflate the cumulative offset
+  cumulative_offset <- baseline_total
   post_y <- if (nrow(post_baseline_result) > 0) post_baseline_result$asmr + cumulative_offset else numeric(0)
   post_lower <- if (nrow(post_baseline_result) > 0) post_baseline_result$lower + cumulative_offset else numeric(0)
   post_upper <- if (nrow(post_baseline_result) > 0) post_baseline_result$upper + cumulative_offset else numeric(0)
@@ -519,11 +520,11 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
   beyond_lower <- if (nrow(fc_beyond_result) > 0) fc_beyond_result$lower + cumulative_offset else numeric(0)
   beyond_upper <- if (nrow(fc_beyond_result) > 0) fc_beyond_result$upper + cumulative_offset else numeric(0)
 
-  # Adjust baseline cumulative to include pre-baseline total
-  baseline_cumulative_adjusted <- baseline_cumulative + pre_total
+  # Pre-baseline cumulative is separate and does not chain into baseline/post-baseline
+  # This ensures excess mortality calculations use only baseline-forward predictions
 
   # Build result vectors
-  result_y <- round(c(pre_cumulative, baseline_cumulative_adjusted, post_y, beyond_y), 2)
+  result_y <- round(c(pre_cumulative, baseline_cumulative, post_y, beyond_y), 2)
   result_lower <- round(c(rep(NA, n_pre_baseline + nrow(bl)), post_lower, beyond_lower), 2)
   result_upper <- round(c(rep(NA, n_pre_baseline + nrow(bl)), post_upper, beyond_upper), 2)
 
