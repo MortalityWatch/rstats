@@ -521,6 +521,27 @@ test_that("handleCumulativeForecast with pre-baseline (bs > 1)", {
   expect_true(all(is.na(result$zscore[9:10])))
 })
 
+test_that("pre-baseline predictions don't inflate cumulative offset", {
+  # Regression test for issue #310: pre-baseline was incorrectly added to
+
+  # cumulative offset, causing excess mortality to show ~-55% instead of
+  # correct values
+  y <- c(100, 100, 100, 100, 100, 100)  # Constant values
+  h <- 0
+  t <- FALSE
+
+  # With bs=3, pre-baseline is years 1-2, baseline is 3-4
+  result <- handleCumulativeForecast(y, h, t, bs = 3, be = 4)
+
+  # Post-baseline (periods 5,6) should continue from baseline_total only
+  # Baseline total for 2 periods of ~100 = ~200
+  # So period 5 should be ~300, period 6 should be ~400
+  expect_equal(result$y[5], 300, tolerance = 10)
+  expect_equal(result$y[6], 400, tolerance = 10)
+
+  # NOT ~500 and ~600 (which would happen if pre_total was included)
+})
+
 # ============================================================================
 # Edge cases and error handling
 # ============================================================================
