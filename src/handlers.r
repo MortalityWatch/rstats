@@ -419,11 +419,19 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
   if (is.null(bs)) bs <- 1L
   if (is.null(be)) be <- length(y)
 
-  # Extract baseline data
+  # Count leading NAs in the full input (for output alignment)
+  # Leading NAs are NA values before the first non-NA value in the input
+  first_non_na_idx <- which(!is.na(y))[1]
+  leading_NA <- if (is.na(first_non_na_idx)) 0 else first_non_na_idx - 1
+
+  # Extract baseline data (should not include leading NAs)
   y_baseline <- y[bs:be]
   n <- length(y_baseline)
 
-  df_baseline <- tibble(year = seq.int(bs, be), asmr = y_baseline) |>
+  # Remove any NA values from baseline for model fitting
+  y_baseline_clean <- y_baseline[!is.na(y_baseline)]
+
+  df_baseline <- tibble(year = seq.int(bs, bs + length(y_baseline_clean) - 1), asmr = y_baseline_clean) |>
     as_tsibble(index = year)
 
   # Fit model with or without trend
@@ -439,14 +447,17 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
     rename(.mean = .fitted)
 
   # Calculate pre-baseline and post-baseline lengths
-  n_pre_baseline <- bs - 1
+  # Pre-baseline excludes leading NAs (those remain as NA in output)
+  n_pre_baseline_total <- bs - 1
+  n_pre_baseline_non_na <- max(0, n_pre_baseline_total - leading_NA)
   n_post_baseline <- length(y_full) - be
 
-  # Generate predictions for pre-baseline period (if any) - no PI
-  pre_baseline_predicted <- if (n_pre_baseline > 0) {
+  # Generate predictions for non-NA pre-baseline period (if any) - no PI
+  # Leading NA positions will be filled with NA in the output
+  pre_baseline_predicted <- if (n_pre_baseline_non_na > 0) {
     first_baseline_idx <- df_baseline$year[1]
-    pre_indices <- (first_baseline_idx - n_pre_baseline):(first_baseline_idx - 1)
-    pre_df <- tibble(year = pre_indices, asmr = y_full[1:n_pre_baseline]) |>
+    pre_indices <- (first_baseline_idx - n_pre_baseline_non_na):(first_baseline_idx - 1)
+    pre_df <- tibble(year = pre_indices, asmr = y_full[(leading_NA + 1):(bs - 1)]) |>
       as_tsibble(index = year)
     fc_pre <- mdl |> forecast(new_data = pre_df)
     as_tibble(fc_pre) |> pull(.mean)
@@ -480,8 +491,8 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
     tibble(asmr = numeric(0), lower = numeric(0), upper = numeric(0))
   }
 
-  # Calculate total result length
-  result_length <- n_pre_baseline + nrow(bl) + n_post_baseline + h
+  # Calculate total result length (includes leading NAs)
+  result_length <- leading_NA + n_pre_baseline_non_na + nrow(bl) + n_post_baseline + h
 
   # Calculate z-scores using helper function
   baseline_residuals <- df_baseline$asmr - bl$.mean
@@ -503,9 +514,9 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
   baseline_cumulative <- cumsum(bl$.mean)
   baseline_total <- sum(bl$.mean)
 
-  # Pre-baseline: cumulative sum of predictions
-  pre_cumulative <- if (n_pre_baseline > 0) cumsum(pre_baseline_predicted) else numeric(0)
-  pre_total <- if (n_pre_baseline > 0) sum(pre_baseline_predicted) else 0
+  # Pre-baseline (non-NA only): cumulative sum of predictions
+  pre_cumulative <- if (n_pre_baseline_non_na > 0) cumsum(pre_baseline_predicted) else numeric(0)
+  pre_total <- if (n_pre_baseline_non_na > 0) sum(pre_baseline_predicted) else 0
 
   # Post-baseline: cumForecastN returns cumulative sums from baseline end,
   # add only baseline total (NOT pre_total) for proper excess mortality calculation
@@ -523,10 +534,10 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
   # Pre-baseline cumulative is separate and does not chain into baseline/post-baseline
   # This ensures excess mortality calculations use only baseline-forward predictions
 
-  # Build result vectors
-  result_y <- round(c(pre_cumulative, baseline_cumulative, post_y, beyond_y), 2)
-  result_lower <- round(c(rep(NA, n_pre_baseline + nrow(bl)), post_lower, beyond_lower), 2)
-  result_upper <- round(c(rep(NA, n_pre_baseline + nrow(bl)), post_upper, beyond_upper), 2)
+  # Build result vectors with leading NAs preserved
+  result_y <- round(c(rep(NA, leading_NA), pre_cumulative, baseline_cumulative, post_y, beyond_y), 2)
+  result_lower <- round(c(rep(NA, leading_NA + n_pre_baseline_non_na + nrow(bl)), post_lower, beyond_lower), 2)
+  result_upper <- round(c(rep(NA, leading_NA + n_pre_baseline_non_na + nrow(bl)), post_upper, beyond_upper), 2)
 
   # Validate: y must be within [lower, upper] where bounds exist
   has_bounds <- !is.na(result_lower) & !is.na(result_upper)

@@ -531,3 +531,54 @@ test_that("validate_request accepts week 53 in xs", {
 
   expect_true(result$valid)
 })
+
+# ============================================================================
+# POST body with NULL values tests (preserving array positions)
+# ============================================================================
+
+test_that("validate_request accepts y as list with NULL values (preserves length)", {
+  # When y is sent as JSON array with nulls, it becomes a list in R
+  # NULL values should become NA, preserving array positions
+  query <- list(
+    y = list(NULL, NULL, NULL, 10, 20, 30, 40, 50),  # 3 nulls + 5 values = 8 elements
+    h = "2",
+    bs = "4",
+    be = "6"
+  )
+
+  result <- validate_request(query, "/cum")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request preserves length when y has leading NULLs", {
+  # Issue: unlist() was stripping NULLs, causing index mismatch with bs/be
+  # Example from bug report: 10 leading nulls, then 9 values = 19 total
+  query <- list(
+    y = list(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+             402.3, 413.9, 390.5, 400.7, 394.7, 446.1, 459.2, 413.7, 404.3),
+    h = "1",
+    bs = "11",
+    be = "14",
+    t = "0"
+  )
+
+  result <- validate_request(query, "/cum")
+
+  # Should pass validation - be (14) <= length (19)
+  expect_true(result$valid, info = "be=14 should be valid for 19-element array with leading NULLs")
+})
+
+test_that("validate_request rejects be > length even with NULL-preserved length", {
+  query <- list(
+    y = list(NULL, NULL, 10, 20, 30),  # 5 elements total
+    h = "2",
+    bs = "3",
+    be = "6"  # > 5, should fail
+  )
+
+  result <- validate_request(query, "/cum")
+
+  expect_false(result$valid)
+  expect_match(result$message, "be.*<= data length")
+})
