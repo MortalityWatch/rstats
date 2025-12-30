@@ -163,8 +163,11 @@ validate_request <- function(query, path) {
   y <- tryCatch({
     if (is.character(y_param)) {
       as.double(strsplit(as.character(y_param), ",")[[1]])
-    } else if (is.list(y_param) || is.numeric(y_param)) {
-      as.double(unlist(y_param))
+    } else if (is.list(y_param)) {
+      # Convert NULL to NA to preserve array positions (unlist() strips NULLs)
+      sapply(y_param, function(x) if (is.null(x)) NA_real_ else as.double(x))
+    } else if (is.numeric(y_param)) {
+      as.double(y_param)
     } else {
       as.double(y_param)
     }
@@ -534,8 +537,11 @@ app$on("request", function(server, request, ...) {
   y_param <- merged_params$y
   if (is.character(y_param)) {
     y <- as.double(strsplit(as.character(y_param), ",")[[1]])
-  } else if (is.list(y_param) || is.numeric(y_param)) {
-    y <- as.double(unlist(y_param))
+  } else if (is.list(y_param)) {
+    # Convert NULL to NA to preserve array positions (unlist() strips NULLs)
+    y <- sapply(y_param, function(x) if (is.null(x)) NA_real_ else as.double(x))
+  } else if (is.numeric(y_param)) {
+    y <- as.double(y_param)
   } else {
     y <- as.double(y_param)
   }

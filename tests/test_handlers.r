@@ -521,6 +521,43 @@ test_that("handleCumulativeForecast with pre-baseline (bs > 1)", {
   expect_true(all(is.na(result$zscore[9:10])))
 })
 
+test_that("handleCumulativeForecast preserves leading NAs in output", {
+  # Issue: /cum endpoint was stripping leading nulls causing index mismatch
+  # Input: 10 leading NAs, then 9 actual values
+  # bs=11, be=14 refer to positions in the FULL 19-element array
+  y <- c(rep(NA, 10), 402.3, 413.9, 390.5, 400.7, 394.7, 446.1, 459.2, 413.7, 404.3)
+  h <- 1  # h must be >= 1
+  t <- FALSE
+
+  result <- handleCumulativeForecast(y, h, t, bs = 11, be = 14)
+
+  # Output should have length = input + h (19 + 1 = 20 elements)
+  expect_equal(length(result$y), length(y) + h)
+  expect_equal(length(result$lower), length(y) + h)
+  expect_equal(length(result$upper), length(y) + h)
+  expect_equal(length(result$zscore), length(y) + h)
+
+  # Leading positions (1-10) should be NA in y
+  expect_true(all(is.na(result$y[1:10])), info = "Leading NA positions should remain NA in output")
+
+  # Baseline positions (11-14) should have cumulative values
+  expect_true(all(!is.na(result$y[11:14])), info = "Baseline positions should have values")
+  expect_true(result$y[11] > 0)
+  expect_true(result$y[14] > result$y[11])  # Cumulative should increase
+
+  # Post-baseline positions (15-19) should have values
+  expect_true(all(!is.na(result$y[15:19])), info = "Post-baseline positions should have values")
+
+  # Z-scores for leading NA positions should be NA
+  expect_true(all(is.na(result$zscore[1:10])), info = "Z-scores for leading NAs should be NA")
+
+  # Z-scores for baseline and post-baseline should be calculated
+  expect_true(all(!is.na(result$zscore[11:19])), info = "Z-scores should be calculated for non-NA data")
+
+  # Forecast z-score should be NA
+  expect_true(is.na(result$zscore[20]), info = "Forecast z-score should be NA")
+})
+
 test_that("pre-baseline predictions don't inflate cumulative offset", {
   # Regression test for issue #310: pre-baseline was incorrectly added to
 
