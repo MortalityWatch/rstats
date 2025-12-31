@@ -824,4 +824,218 @@ test_that("handleForecast seasonal patterns align with actual calendar weeks", {
   expect_true(forecast_values[52] > mean(forecast_values[1:51]))
 })
 
+# ============================================================================
+# handleASD() tests - Age-Standardized Deaths
+# ============================================================================
+
+# Helper function to check ASD result structure
+check_asd_result <- function(result, expected_length) {
+  expect_true("asd" %in% names(result))
+  expect_true("asd_bl" %in% names(result))
+  expect_true("lower" %in% names(result))
+  expect_true("upper" %in% names(result))
+  expect_true("zscore" %in% names(result))
+  expect_equal(length(result$asd), expected_length)
+  expect_equal(length(result$asd_bl), expected_length)
+  expect_equal(length(result$lower), expected_length)
+  expect_equal(length(result$upper), expected_length)
+  expect_equal(length(result$zscore), expected_length)
+}
+
+# Helper to create age_groups structure
+make_age_groups <- function(...) {
+  groups <- list(...)
+  lapply(groups, function(g) list(deaths = g$deaths, population = g$population))
+}
+
+test_that("handleASD with single age group works", {
+  age_groups <- make_age_groups(
+    list(deaths = c(1000, 1050, 1100, 1080, 1120), population = c(100000, 100000, 100000, 100000, 100000))
+  )
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+
+  result <- handleASD(age_groups, h, m, t)
+
+  check_asd_result(result, 5)
+  expect_true(all(!is.na(result$asd_bl)))
+})
+
+test_that("handleASD with multiple age groups sums correctly", {
+  # Two age groups with different rates
+  # Group 1: rate = 0.01 (1%)
+  # Group 2: rate = 0.02 (2%)
+  age_groups <- make_age_groups(
+    list(deaths = c(100, 100, 100, 100, 100), population = c(10000, 10000, 10000, 10000, 10000)),
+    list(deaths = c(200, 200, 200, 200, 200), population = c(10000, 10000, 10000, 10000, 10000))
+  )
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+
+  result <- handleASD(age_groups, h, m, t)
+
+  check_asd_result(result, 5)
+
+  # Total deaths should be 300 per period
+  expect_equal(result$asd[1], 300)
+
+  # Total expected should also be ~300 (rates applied to populations, then summed)
+  expect_equal(result$asd_bl[1], 300, tolerance = 1)
+})
+
+test_that("handleASD detects age structure change", {
+  # KEY TEST: Age structure changes but rates stay constant
+  # Baseline: Group A (young) has 50% of pop, Group B (old) has 50%
+  # Post-baseline: Group B grows to 75% of pop
+  #
+  # Group A rate = 0.005 (0.5%)
+  # Group B rate = 0.02 (2%)
+
+  age_groups <- make_age_groups(
+    # Group A (young): rate stays at 0.5%, but population shrinks
+    list(
+      deaths = c(50, 50, 50, 25, 25),      # Baseline: 50, post: 25 (matches new pop)
+      population = c(10000, 10000, 10000, 5000, 5000)  # Shrinks to 5000
+    ),
+    # Group B (old): rate stays at 2%, but population grows
+    list(
+      deaths = c(200, 200, 200, 300, 300),  # Baseline: 200, post: 300 (matches new pop)
+      population = c(10000, 10000, 10000, 15000, 15000)  # Grows to 15000
+    )
+  )
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+  bs <- 1
+  be <- 3
+
+  result <- handleASD(age_groups, h, m, t, bs, be)
+
+  # Total deaths: baseline = 250, post = 325
+  expect_equal(result$asd[1], 250)
+  expect_equal(result$asd[4], 325)
+
+  # Expected deaths post-baseline:
+  # Group A: 0.005 * 5000 = 25
+  # Group B: 0.02 * 15000 = 300
+  # Total expected = 325
+  expect_equal(result$asd_bl[4], 325, tolerance = 1)
+
+  # Z-scores should be close to 0 (rates didn't change, just age structure)
+  expect_true(abs(result$zscore[4]) < 0.5)
+})
+
+test_that("handleASD detects true excess with multiple age groups", {
+  # Baseline: normal rates
+  # Post-baseline: rates increase in both groups (true excess)
+
+  age_groups <- make_age_groups(
+    # Group A: rate increases from 1% to 1.5%
+    list(
+      deaths = c(100, 100, 100, 150, 150),
+      population = c(10000, 10000, 10000, 10000, 10000)
+    ),
+    # Group B: rate increases from 2% to 3%
+    list(
+      deaths = c(200, 200, 200, 300, 300),
+      population = c(10000, 10000, 10000, 10000, 10000)
+    )
+  )
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+  bs <- 1
+  be <- 3
+
+  result <- handleASD(age_groups, h, m, t, bs, be)
+
+  # Total deaths: baseline = 300, post = 450
+  expect_equal(result$asd[4], 450)
+
+  # Expected deaths post-baseline (using baseline rates):
+  # Group A: 0.01 * 10000 = 100
+  # Group B: 0.02 * 10000 = 200
+  # Total expected = 300
+  expect_equal(result$asd_bl[4], 300, tolerance = 1)
+
+  # Z-scores should be strongly positive (true excess)
+  expect_true(result$zscore[4] > 2)
+})
+
+test_that("handleASD with lin_reg and multiple age groups works", {
+  age_groups <- make_age_groups(
+    list(deaths = c(100, 110, 120, 130, 140), population = c(10000, 10000, 10000, 10000, 10000)),
+    list(deaths = c(200, 210, 220, 230, 240), population = c(10000, 10000, 10000, 10000, 10000))
+  )
+  h <- 0
+  m <- "lin_reg"
+  t <- TRUE
+  bs <- 1
+  be <- 3
+
+  result <- handleASD(age_groups, h, m, t, bs, be)
+
+  check_asd_result(result, 5)
+
+  # With trend, expected should follow the linear pattern
+  expect_true(result$asd_bl[4] > result$asd_bl[3])
+  expect_true(result$asd_bl[5] > result$asd_bl[4])
+})
+
+test_that("handleASD prediction intervals sum across age groups", {
+  # Use baseline data with variance to generate proper PIs
+  age_groups <- make_age_groups(
+    list(deaths = c(95, 100, 105, 150, 150), population = c(10000, 10000, 10000, 10000, 10000)),
+    list(deaths = c(190, 200, 210, 250, 250), population = c(10000, 10000, 10000, 10000, 10000))
+  )
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+  bs <- 1
+  be <- 3
+
+  result <- handleASD(age_groups, h, m, t, bs, be)
+
+  # PI should be NA for baseline period
+  expect_true(all(is.na(result$lower[1:3])))
+  expect_true(all(is.na(result$upper[1:3])))
+
+  # PI should exist for post-baseline
+  expect_true(all(!is.na(result$lower[4:5])))
+  expect_true(all(!is.na(result$upper[4:5])))
+
+  # Lower should be less than upper (now we have variance so PI has width)
+  expect_true(result$lower[4] < result$upper[4])
+})
+
+test_that("handleASD with forecast horizon works", {
+  age_groups <- make_age_groups(
+    list(deaths = c(100, 100, 100), population = c(10000, 10000, 10000))
+  )
+  h <- 2
+  m <- "mean"
+  t <- FALSE
+
+  result <- handleASD(age_groups, h, m, t)
+
+  check_asd_result(result, 5)  # 3 data + 2 forecast
+
+  # Forecast deaths should be NA
+  expect_true(is.na(result$asd[4]))
+  expect_true(is.na(result$asd[5]))
+
+  # Forecast expected should exist
+  expect_true(!is.na(result$asd_bl[4]))
+  expect_true(!is.na(result$asd_bl[5]))
+})
+
+test_that("handleASD errors on empty age_groups", {
+  expect_error(
+    handleASD(list(), 0, "mean", FALSE),
+    "at least one age group"
+  )
+})
+
 message("\nHandler tests completed!")

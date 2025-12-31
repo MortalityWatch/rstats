@@ -556,3 +556,238 @@ handleCumulativeForecast <- function(y, h, t, bs = NULL, be = NULL) {
     zscore = zscores
   )
 }
+
+#' Handle ASD (Age-Standardized Deaths) request
+#'
+#' Calculates age-standardized deaths using the Levitt method.
+#' Requires age-stratified data: deaths and population for each age group.
+#' This properly accounts for changes in age structure over time.
+#'
+#' @param age_groups List of lists, each containing 'deaths' and 'population' vectors
+#' @param h Integer horizon for forecasting beyond observed data
+#' @param m Character method: "naive", "mean", "median", "lin_reg", or "exp"
+#' @param t Boolean whether to include trend (only used with lin_reg)
+#' @param bs Baseline start index (1-indexed, optional). If NULL, defaults to 1.
+#' @param be Baseline end index (1-indexed, optional). If NULL, defaults to data length.
+#'
+#' @details
+#' The ASD calculation for each age group:
+#' - rate(t) = deaths(t) / population(t)
+#' - Fit baseline model on rates
+#' - expected_deaths(t) = predicted_rate(t) × population(t)
+#'
+#' Then sum across age groups:
+#' - asd = sum of actual deaths across all age groups
+#' - asd_bl = sum of expected deaths across all age groups
+#'
+#' This properly handles changes in age structure because each age group's
+#' baseline rate is applied to that group's current population.
+#'
+#' @return List with:
+#'   - asd: Total actual deaths (sum across age groups)
+#'   - asd_bl: Total expected deaths (sum across age groups)
+#'   - lower: Lower 95% prediction interval
+#'   - upper: Upper 95% prediction interval
+#'   - zscore: Z-scores for each period
+handleASD <- function(age_groups, h, m, t, bs = NULL, be = NULL) {
+  n_groups <- length(age_groups)
+  if (n_groups == 0) {
+    stop("age_groups must contain at least one age group")
+  }
+
+  # Get data length from first age group
+  first_group <- age_groups[[1]]
+  data_length <- length(first_group$deaths)
+
+  # Set defaults for baseline start/end if not provided
+  if (is.null(bs)) bs <- 1L
+  if (is.null(be)) be <- data_length
+
+  # Initialize accumulators for summing across age groups
+  total_deaths <- rep(0, data_length + h)
+  total_expected <- rep(0, data_length + h)
+  total_lower <- rep(0, data_length + h)
+  total_upper <- rep(0, data_length + h)
+
+  # Track which positions have valid PI (post-baseline only)
+  has_pi <- rep(FALSE, data_length + h)
+  if (be < data_length || h > 0) {
+    has_pi[(be + 1):(data_length + h)] <- TRUE
+  }
+
+  # Process each age group
+  for (i in seq_len(n_groups)) {
+    group <- age_groups[[i]]
+    deaths <- group$deaths
+    population <- group$population
+
+    # Calculate mortality rates for this age group
+    rates <- deaths / population
+
+    # Count leading NAs (for output alignment)
+    first_non_na_idx <- which(!is.na(rates))[1]
+    leading_NA <- if (is.na(first_non_na_idx)) 0 else first_non_na_idx - 1
+
+    # Adjust baseline start for leading NAs when bs=1
+    actual_bs <- if (bs == 1 && leading_NA > 0) leading_NA + 1 else bs
+    rates_baseline_clean <- if (bs == 1 && leading_NA > 0) {
+      rates[(leading_NA + 1):be]
+    } else {
+      rates[bs:be]
+    }
+
+    # Create baseline tsibble
+    df_baseline <- tibble(year = seq.int(actual_bs, be), rate = rates_baseline_clean) |>
+      as_tsibble(index = year) |>
+      filter(!is.na(rate))
+
+    # Fit model based on method
+    if (m == "naive") {
+      mdl <- df_baseline |> model(NAIVE(rate))
+    } else if (m == "mean") {
+      mdl <- df_baseline |> model(TSLM(rate))
+    } else if (m == "median") {
+      mdl <- df_baseline |> model(MEDIAN(rate))
+    } else if (m == "lin_reg") {
+      if (t) {
+        mdl <- df_baseline |> model(TSLM(rate ~ trend()))
+      } else {
+        mdl <- df_baseline |> model(TSLM(rate))
+      }
+    } else if (m == "exp") {
+      mdl <- df_baseline |> model(ETS(rate ~ error("A") + trend("Ad")))
+    } else {
+      stop(paste("Unknown method for ASD:", m))
+    }
+
+    # Get fitted values for baseline period
+    bl <- mdl |>
+      augment() |>
+      rename(.mean = .fitted)
+
+    # Calculate pre-baseline and post-baseline lengths
+    n_pre_baseline <- if (bs == 1 && leading_NA > 0) 0 else (bs - 1)
+    n_post_baseline <- data_length - be
+
+    # Generate predictions for pre-baseline period (if any)
+    pre_baseline_rates <- if (n_pre_baseline > 0) {
+      first_baseline_idx <- df_baseline$year[1]
+      pre_indices <- (first_baseline_idx - n_pre_baseline):(first_baseline_idx - 1)
+      pre_df <- tibble(year = pre_indices, rate = rates[1:n_pre_baseline]) |>
+        as_tsibble(index = year)
+      fc_pre <- mdl |> forecast(new_data = pre_df)
+      as_tibble(fc_pre) |> pull(.mean)
+    } else {
+      numeric(0)
+    }
+
+    # Generate predictions for post-baseline period with PI
+    post_baseline_result <- if (n_post_baseline > 0) {
+      fc_post <- mdl |> forecast(h = n_post_baseline)
+      fc_post_hilo <- fabletools::hilo(fc_post, 95) |>
+        unpack_hilo(cols = `95%`) |>
+        as_tibble() |>
+        select(.mean, "95%_lower", "95%_upper") |>
+        setNames(c("rate", "lower", "upper"))
+      fc_post_hilo
+    } else {
+      tibble(rate = numeric(0), lower = numeric(0), upper = numeric(0))
+    }
+
+    # Generate forecast beyond observed data (if h > 0)
+    fc_beyond_result <- if (h > 0) {
+      fc_beyond <- mdl |> forecast(h = n_post_baseline + h)
+      fc_beyond_hilo <- fabletools::hilo(fc_beyond, 95) |>
+        unpack_hilo(cols = `95%`) |>
+        as_tibble() |>
+        select(.mean, "95%_lower", "95%_upper") |>
+        setNames(c("rate", "lower", "upper")) |>
+        tail(h)
+      fc_beyond_hilo
+    } else {
+      tibble(rate = numeric(0), lower = numeric(0), upper = numeric(0))
+    }
+
+    # Combine all predicted rates for this age group
+    all_predicted_rates <- c(
+      rep(NA, leading_NA),
+      pre_baseline_rates,
+      bl$.mean,
+      post_baseline_result$rate,
+      fc_beyond_result$rate
+    )
+
+    # Build rate bounds
+    rate_lower <- c(
+      rep(NA, leading_NA + n_pre_baseline + nrow(bl)),
+      post_baseline_result$lower,
+      fc_beyond_result$lower
+    )
+    rate_upper <- c(
+      rep(NA, leading_NA + n_pre_baseline + nrow(bl)),
+      post_baseline_result$upper,
+      fc_beyond_result$upper
+    )
+
+    # Extend population for forecast horizon
+    population_extended <- if (h > 0) {
+      c(population, rep(population[length(population)], h))
+    } else {
+      population
+    }
+
+    # Calculate expected deaths for this age group
+    expected_deaths <- all_predicted_rates * population_extended
+    expected_lower <- rate_lower * population_extended
+    expected_upper <- rate_upper * population_extended
+
+    # Extend actual deaths for output
+    deaths_extended <- if (h > 0) {
+      c(deaths, rep(NA, h))
+    } else {
+      deaths
+    }
+
+    # Accumulate totals (handle NAs properly)
+    for (j in seq_len(data_length + h)) {
+      if (!is.na(deaths_extended[j])) {
+        total_deaths[j] <- total_deaths[j] + deaths_extended[j]
+      }
+      if (!is.na(expected_deaths[j])) {
+        total_expected[j] <- total_expected[j] + expected_deaths[j]
+      }
+      if (!is.na(expected_lower[j])) {
+        total_lower[j] <- total_lower[j] + expected_lower[j]
+      }
+      if (!is.na(expected_upper[j])) {
+        total_upper[j] <- total_upper[j] + expected_upper[j]
+      }
+    }
+  }
+
+  # Set PI to NA where we don't have bounds (pre-baseline and baseline)
+  total_lower[!has_pi] <- NA
+  total_upper[!has_pi] <- NA
+
+  # Set forecast deaths to NA
+  if (h > 0) {
+    total_deaths[(data_length + 1):(data_length + h)] <- NA
+  }
+
+  # Calculate z-scores on totals
+  # Use baseline period residuals for SD calculation
+  baseline_deaths <- total_deaths[bs:be]
+  baseline_expected <- total_expected[bs:be]
+  baseline_residuals <- baseline_deaths - baseline_expected
+  residual_sd <- sd(baseline_residuals, na.rm = TRUE)
+
+  zscores <- (total_deaths - total_expected) / residual_sd
+
+  list(
+    asd = round(total_deaths, 2),
+    asd_bl = round(total_expected, 2),
+    lower = round(total_lower, 2),
+    upper = round(total_upper, 2),
+    zscore = round(zscores, 3)
+  )
+}
