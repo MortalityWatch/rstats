@@ -584,13 +584,37 @@ test_that("validate_request rejects be > length even with NULL-preserved length"
 })
 
 # ============================================================================
-# ASD endpoint validation tests
+# ASD endpoint validation tests (multi-age-group structure)
 # ============================================================================
 
-test_that("validate_request accepts valid ASD request", {
+# Helper to create age groups for ASD tests
+make_test_age_groups <- function(...) {
+  groups <- list(...)
+  lapply(groups, function(g) list(deaths = g$deaths, population = g$population))
+}
+
+test_that("validate_request accepts valid ASD request with single age group", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000, 100000, 100000))
+    ),
+    h = "2",
+    m = "mean"
+  )
+
+  result <- validate_request(query, "/asd")
+
+  expect_true(result$valid)
+})
+
+test_that("validate_request accepts valid ASD request with multiple age groups", {
+  query <- list(
+    age_groups = list(
+      list(deaths = c(100, 110, 120, 130, 140), population = c(10000, 10000, 10000, 10000, 10000)),
+      list(deaths = c(500, 520, 540, 560, 580), population = c(50000, 50000, 50000, 50000, 50000)),
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(40000, 40000, 40000, 40000, 40000))
+    ),
+    h = "2",
     m = "mean"
   )
 
@@ -601,9 +625,11 @@ test_that("validate_request accepts valid ASD request", {
 
 test_that("validate_request accepts ASD request with lin_reg method", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000, 100000, 100000))
+    ),
     m = "lin_reg",
+    h = "2",
     t = "1"
   )
 
@@ -612,10 +638,40 @@ test_that("validate_request accepts ASD request with lin_reg method", {
   expect_true(result$valid)
 })
 
-test_that("validate_request rejects ASD request missing deaths", {
+test_that("validate_request rejects ASD request missing age_groups", {
   query <- list(
-    population = "100000,100000,100000,100000,100000",
-    m = "mean"
+    m = "mean",
+    h = "2"
+  )
+
+  result <- validate_request(query, "/asd")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "age_groups")
+})
+
+test_that("validate_request rejects ASD request with empty age_groups", {
+  query <- list(
+    age_groups = list(),
+    m = "mean",
+    h = "2"
+  )
+
+  result <- validate_request(query, "/asd")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "non-empty")
+})
+
+test_that("validate_request rejects ASD group missing deaths", {
+  query <- list(
+    age_groups = list(
+      list(population = c(100000, 100000, 100000, 100000, 100000))
+    ),
+    m = "mean",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -625,10 +681,13 @@ test_that("validate_request rejects ASD request missing deaths", {
   expect_match(result$message, "deaths")
 })
 
-test_that("validate_request rejects ASD request missing population", {
+test_that("validate_request rejects ASD group missing population", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    m = "mean"
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200))
+    ),
+    m = "mean",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -638,11 +697,13 @@ test_that("validate_request rejects ASD request missing population", {
   expect_match(result$message, "population")
 })
 
-test_that("validate_request rejects ASD request with mismatched array lengths", {
+test_that("validate_request rejects ASD group with mismatched array lengths", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000",  # Only 3 elements
-    m = "mean"
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000))
+    ),
+    m = "mean",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -652,11 +713,30 @@ test_that("validate_request rejects ASD request with mismatched array lengths", 
   expect_match(result$message, "same length")
 })
 
+test_that("validate_request rejects ASD groups with different lengths", {
+  query <- list(
+    age_groups = list(
+      list(deaths = c(100, 110, 120, 130, 140), population = c(10000, 10000, 10000, 10000, 10000)),
+      list(deaths = c(500, 520, 540), population = c(50000, 50000, 50000))  # Different length
+    ),
+    m = "mean",
+    h = "2"
+  )
+
+  result <- validate_request(query, "/asd")
+
+  expect_false(result$valid)
+  expect_equal(result$status, 400)
+  expect_match(result$message, "same.*length", ignore.case = TRUE)
+})
+
 test_that("validate_request accepts ASD request with median method", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
-    m = "median"
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000, 100000, 100000))
+    ),
+    m = "median",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -666,9 +746,11 @@ test_that("validate_request accepts ASD request with median method", {
 
 test_that("validate_request accepts ASD request with naive method", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
-    m = "naive"
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000, 100000, 100000))
+    ),
+    m = "naive",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -678,9 +760,14 @@ test_that("validate_request accepts ASD request with naive method", {
 
 test_that("validate_request accepts ASD request with exp method", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200,1180,1220,1250",  # Need more data for ETS
-    population = "100000,100000,100000,100000,100000,100000,100000,100000",
-    m = "exp"
+    age_groups = list(
+      list(
+        deaths = c(1000, 1050, 1100, 1150, 1200, 1180, 1220, 1250),
+        population = c(100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000)
+      )
+    ),
+    m = "exp",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -690,9 +777,11 @@ test_that("validate_request accepts ASD request with exp method", {
 
 test_that("validate_request rejects ASD request with invalid method", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
-    m = "invalid_method"
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000, 100000, 100000))
+    ),
+    m = "invalid_method",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -702,11 +791,13 @@ test_that("validate_request rejects ASD request with invalid method", {
   expect_match(result$message, "naive, mean, median, lin_reg, exp")
 })
 
-test_that("validate_request rejects ASD request with zero population", {
+test_that("validate_request rejects ASD group with zero population", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,0,100000,100000,100000",  # Zero in population
-    m = "mean"
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 0, 100000, 100000, 100000))
+    ),
+    m = "mean",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -716,11 +807,13 @@ test_that("validate_request rejects ASD request with zero population", {
   expect_match(result$message, "positive")
 })
 
-test_that("validate_request rejects ASD request with negative population", {
+test_that("validate_request rejects ASD group with negative population", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,-100000,100000,100000,100000",
-    m = "mean"
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, -100000, 100000, 100000, 100000))
+    ),
+    m = "mean",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -732,9 +825,11 @@ test_that("validate_request rejects ASD request with negative population", {
 
 test_that("validate_request accepts ASD request with baseline params", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000, 100000, 100000))
+    ),
     m = "mean",
+    h = "2",
     bs = "1",
     be = "3"
   )
@@ -746,9 +841,11 @@ test_that("validate_request accepts ASD request with baseline params", {
 
 test_that("validate_request rejects ASD request with invalid baseline params", {
   query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
+    age_groups = list(
+      list(deaths = c(1000, 1050, 1100, 1150, 1200), population = c(100000, 100000, 100000, 100000, 100000))
+    ),
     m = "mean",
+    h = "2",
     bs = "1",
     be = "10"  # > length
   )
@@ -760,24 +857,13 @@ test_that("validate_request rejects ASD request with invalid baseline params", {
   expect_match(result$message, "be.*<= data length")
 })
 
-test_that("validate_request accepts ASD request with horizon", {
-  query <- list(
-    deaths = "1000,1050,1100,1150,1200",
-    population = "100000,100000,100000,100000,100000",
-    m = "mean",
-    h = "3"
-  )
-
-  result <- validate_request(query, "/asd")
-
-  expect_true(result$valid)
-})
-
 test_that("validate_request rejects ASD request with insufficient data points", {
   query <- list(
-    deaths = "1000,1050",  # Only 2 points
-    population = "100000,100000",
-    m = "mean"
+    age_groups = list(
+      list(deaths = c(1000, 1050), population = c(100000, 100000))
+    ),
+    m = "mean",
+    h = "2"
   )
 
   result <- validate_request(query, "/asd")
@@ -785,28 +871,4 @@ test_that("validate_request rejects ASD request with insufficient data points", 
   expect_false(result$valid)
   expect_equal(result$status, 400)
   expect_match(result$message, "at least 3")
-})
-
-test_that("validate_request accepts ASD with POST-style list params", {
-  query <- list(
-    deaths = list(1000, 1050, 1100, 1150, 1200),
-    population = list(100000, 100000, 100000, 100000, 100000),
-    m = "mean"
-  )
-
-  result <- validate_request(query, "/asd")
-
-  expect_true(result$valid)
-})
-
-test_that("validate_request accepts ASD with NULL values in arrays", {
-  query <- list(
-    deaths = list(NULL, NULL, 1000, 1050, 1100, 1150, 1200),
-    population = list(100000, 100000, 100000, 100000, 100000, 100000, 100000),
-    m = "mean"
-  )
-
-  result <- validate_request(query, "/asd")
-
-  expect_true(result$valid)
 })

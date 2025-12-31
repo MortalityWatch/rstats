@@ -170,60 +170,79 @@ parse_numeric_array <- function(param) {
 #' @param query Query parameters from request
 #' @return List with valid=TRUE/FALSE and error message if invalid
 validate_asd_request <- function(query) {
-  # Check for required 'deaths' parameter
-  if (is.null(query$deaths)) {
-    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'deaths'"))
+  # Check for required 'age_groups' parameter
+  if (is.null(query$age_groups)) {
+    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'age_groups'"))
   }
 
-  # Check for required 'population' parameter
-  if (is.null(query$population)) {
-    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'population'"))
+  age_groups <- query$age_groups
+  if (!is.list(age_groups) || length(age_groups) == 0) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'age_groups' must be a non-empty array"))
   }
 
-  # Parse deaths array
-  deaths <- parse_numeric_array(query$deaths)
-  if (is.null(deaths)) {
-    return(list(
-      valid = FALSE, status = 400,
-      message = "Parameter 'deaths' must be comma-separated numeric values or a numeric array"
-    ))
+  # Validate each age group
+  first_length <- NULL
+  for (i in seq_along(age_groups)) {
+    group <- age_groups[[i]]
+
+    # Check for required fields
+    if (is.null(group$deaths)) {
+      return(list(valid = FALSE, status = 400,
+                  message = paste0("age_groups[", i, "] missing required field 'deaths'")))
+    }
+    if (is.null(group$population)) {
+      return(list(valid = FALSE, status = 400,
+                  message = paste0("age_groups[", i, "] missing required field 'population'")))
+    }
+
+    # Parse deaths array
+    deaths <- parse_numeric_array(group$deaths)
+    if (is.null(deaths)) {
+      return(list(valid = FALSE, status = 400,
+                  message = paste0("age_groups[", i, "].deaths must be numeric array")))
+    }
+
+    # Parse population array
+    population <- parse_numeric_array(group$population)
+    if (is.null(population)) {
+      return(list(valid = FALSE, status = 400,
+                  message = paste0("age_groups[", i, "].population must be numeric array")))
+    }
+
+    # Check arrays have same length
+    if (length(deaths) != length(population)) {
+      return(list(valid = FALSE, status = 400,
+                  message = paste0("age_groups[", i, "]: deaths and population must have same length")))
+    }
+
+    # Check all age groups have same length
+    if (is.null(first_length)) {
+      first_length <- length(deaths)
+    } else if (length(deaths) != first_length) {
+      return(list(valid = FALSE, status = 400,
+                  message = "All age groups must have same data length"))
+    }
+
+    # Check minimum data points
+    valid_deaths <- deaths[!is.na(deaths)]
+    if (length(valid_deaths) < 3) {
+      return(list(valid = FALSE, status = 400,
+                  message = paste0("age_groups[", i, "].deaths must contain at least 3 valid data points")))
+    }
+
+    # Check population has no zeros or negatives
+    valid_population <- population[!is.na(population)]
+    if (any(valid_population <= 0)) {
+      return(list(valid = FALSE, status = 400,
+                  message = paste0("age_groups[", i, "].population must contain only positive values")))
+    }
   }
 
-  # Parse population array
-  population <- parse_numeric_array(query$population)
-  if (is.null(population)) {
-    return(list(
-      valid = FALSE, status = 400,
-      message = "Parameter 'population' must be comma-separated numeric values or a numeric array"
-    ))
-  }
-
-  # Check arrays have same length
-  if (length(deaths) != length(population)) {
-    return(list(
-      valid = FALSE, status = 400,
-      message = paste0(
-        "Parameters 'deaths' and 'population' must have same length. ",
-        "deaths has ", length(deaths), " elements, population has ", length(population)
-      )
-    ))
-  }
-
-  # Check minimum data points
-  valid_deaths <- deaths[!is.na(deaths)]
-  if (length(valid_deaths) < 3) {
-    return(list(valid = FALSE, status = 400, message = "Parameter 'deaths' must contain at least 3 valid data points"))
-  }
-
-  # Check maximum array size (prevent DOS)
-  if (length(deaths) > 10000) {
-    return(list(valid = FALSE, status = 400, message = "Parameter 'deaths' exceeds maximum length of 10000"))
-  }
-
-  # Check population has no zeros or negatives (would cause division errors)
-  valid_population <- population[!is.na(population)]
-  if (any(valid_population <= 0)) {
-    return(list(valid = FALSE, status = 400, message = "Parameter 'population' must contain only positive values"))
+  # Check maximum total data size (prevent DOS)
+  total_elements <- first_length * length(age_groups)
+  if (total_elements > 100000) {
+    return(list(valid = FALSE, status = 400,
+                message = "Total data size exceeds maximum (100000 elements)"))
   }
 
   # Validate 'm' (method) - all baseline methods supported for ASD
@@ -239,17 +258,15 @@ validate_asd_request <- function(query) {
   # Validate 'h' (horizon) - optional, default 0 for ASD
   h <- as.integer(query$h %||% 0)
   if (is.na(h) || h < 0 || h > 1000) {
-    return(list(valid = FALSE, status = 400, message = "Parameter 'h' must be a non-negative integer between 0 and 1000"))
+    return(list(valid = FALSE, status = 400,
+                message = "Parameter 'h' must be a non-negative integer between 0 and 1000"))
   }
 
   # Validate baseline parameters if provided
   if (!is.null(query$bs) || !is.null(query$be)) {
     if (is.null(query$bs) || is.null(query$be)) {
-      return(list(
-        valid = FALSE,
-        status = 400,
-        message = "Parameters 'bs' and 'be' must both be provided together"
-      ))
+      return(list(valid = FALSE, status = 400,
+                  message = "Parameters 'bs' and 'be' must both be provided together"))
     }
 
     bs <- tryCatch(as.integer(query$bs), error = function(e) NA)
@@ -267,21 +284,8 @@ validate_asd_request <- function(query) {
     if (be <= bs) {
       return(list(valid = FALSE, status = 400, message = "Parameter 'be' must be > 'bs'"))
     }
-    if (be > length(deaths)) {
-      msg <- paste0(
-        "Parameter 'be' (", be, ") must be <= data length (", length(deaths), ")"
-      )
-      return(list(valid = FALSE, status = 400, message = msg))
-    }
-
-    # Validate that baseline period has sufficient non-NA values
-    baseline_data <- deaths[bs:be]
-    non_na_count <- sum(!is.na(baseline_data))
-    if (non_na_count < 3) {
-      msg <- paste0(
-        "Baseline period (deaths[", bs, ":", be, "]) contains only ", non_na_count,
-        " non-NA values. At least 3 non-NA values are required."
-      )
+    if (be > first_length) {
+      msg <- paste0("Parameter 'be' (", be, ") must be <= data length (", first_length, ")")
       return(list(valid = FALSE, status = 400, message = msg))
     }
   }
@@ -686,11 +690,10 @@ app$on("request", function(server, request, ...) {
   # Process request with error handling
   res <- tryCatch({
     if (request$path == "/asd") {
-      # ASD endpoint: parse deaths and population
-      deaths <- parse_numeric_array(merged_params$deaths)
-      population <- parse_numeric_array(merged_params$population)
+      # ASD endpoint: pass age_groups directly (already validated)
+      age_groups <- merged_params$age_groups
       m <- merged_params$m
-      handleASD(deaths, population, h, m, t, bs, be)
+      handleASD(age_groups, h, m, t, bs, be)
     } else if (request$path == "/") {
       # Standard forecast endpoint: parse y
       y <- parse_numeric_array(merged_params$y)
