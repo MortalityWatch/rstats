@@ -690,8 +690,13 @@ app$on("request", function(server, request, ...) {
   # Process request with error handling
   res <- tryCatch({
     if (request$path == "/asd") {
-      # ASD endpoint: pass age_groups directly (already validated)
-      age_groups <- merged_params$age_groups
+      # ASD endpoint: parse age_groups arrays before passing to handler
+      age_groups <- lapply(merged_params$age_groups, function(group) {
+        list(
+          deaths = parse_numeric_array(group$deaths),
+          population = parse_numeric_array(group$population)
+        )
+      })
       m <- merged_params$m
       handleASD(age_groups, h, m, t, bs, be)
     } else if (request$path == "/") {

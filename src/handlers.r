@@ -618,8 +618,8 @@ handleASD <- function(age_groups, h, m, t, bs = NULL, be = NULL) {
   # Process each age group
   for (i in seq_len(n_groups)) {
     group <- age_groups[[i]]
-    deaths <- as.numeric(group$deaths)
-    population <- as.numeric(group$population)
+    deaths <- group$deaths
+    population <- group$population
 
     # Calculate mortality rates for this age group
     rates <- deaths / population
