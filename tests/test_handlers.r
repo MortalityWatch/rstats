@@ -824,4 +824,315 @@ test_that("handleForecast seasonal patterns align with actual calendar weeks", {
   expect_true(forecast_values[52] > mean(forecast_values[1:51]))
 })
 
+# ============================================================================
+# handleASD() tests - Age-Standardized Deaths
+# ============================================================================
+
+# Helper function to check ASD result structure
+check_asd_result <- function(result, expected_length) {
+  expect_true("asd" %in% names(result))
+  expect_true("asd_bl" %in% names(result))
+  expect_true("lower" %in% names(result))
+  expect_true("upper" %in% names(result))
+  expect_true("zscore" %in% names(result))
+  expect_equal(length(result$asd), expected_length)
+  expect_equal(length(result$asd_bl), expected_length)
+  expect_equal(length(result$lower), expected_length)
+  expect_equal(length(result$upper), expected_length)
+  expect_equal(length(result$zscore), expected_length)
+}
+
+test_that("handleASD with mean method works", {
+  # Simple case: deaths increase with population
+  deaths <- c(1000, 1050, 1100, 1080, 1120, 1150, 1200)
+  population <- c(100000, 101000, 102000, 103000, 104000, 105000, 106000)
+  h <- 0  # No forecast beyond data
+  m <- "mean"
+  t <- FALSE
+
+  result <- handleASD(deaths, population, h, m, t)
+
+  check_asd_result(result, length(deaths))
+
+  # asd should equal input deaths
+  expect_equal(result$asd, deaths)
+
+  # asd_bl should be calculated (rate * population)
+  expect_true(all(!is.na(result$asd_bl)))
+})
+
+test_that("handleASD with lin_reg and trend works", {
+  deaths <- c(1000, 1100, 1200, 1300, 1400, 1500, 1600)
+  population <- c(100000, 100000, 100000, 100000, 100000, 100000, 100000)
+  h <- 0
+  m <- "lin_reg"
+  t <- TRUE
+
+  result <- handleASD(deaths, population, h, m, t)
+
+  check_asd_result(result, length(deaths))
+
+  # With linear trend in deaths and constant population,
+  # the fitted values should follow the trend
+  expect_true(all(!is.na(result$asd_bl)))
+})
+
+test_that("handleASD with median method works", {
+  deaths <- c(1000, 1050, 1100, 1080, 1120, 1150, 1200)
+  population <- c(100000, 100000, 100000, 100000, 100000, 100000, 100000)
+  h <- 0
+  m <- "median"
+  t <- FALSE
+
+  result <- handleASD(deaths, population, h, m, t)
+
+  check_asd_result(result, length(deaths))
+
+  # Median baseline should produce constant expected rate
+  # asd_bl should be calculated (median rate * population)
+  expect_true(all(!is.na(result$asd_bl)))
+})
+
+test_that("handleASD with naive method works", {
+  # Use with baseline params to test post-baseline forecasting
+  deaths <- c(1000, 1050, 1100, 1500, 1550, 1600)
+  population <- c(100000, 100000, 100000, 100000, 100000, 100000)
+  h <- 0
+  m <- "naive"
+  t <- FALSE
+  bs <- 1
+  be <- 3
+
+  result <- handleASD(deaths, population, h, m, t, bs, be)
+
+  check_asd_result(result, length(deaths))
+
+  # Naive uses last baseline rate for forecasting
+  # Post-baseline asd_bl should be calculated (periods 4-6)
+  expect_true(all(!is.na(result$asd_bl[4:6])))
+
+  # Post-baseline z-scores should be positive (deaths higher than expected)
+  expect_true(result$zscore[4] > 0)
+})
+
+test_that("handleASD with exp (ETS) method works", {
+  # ETS needs more data points
+  deaths <- c(1000, 1050, 1100, 1080, 1120, 1150, 1200, 1180, 1220, 1250)
+  population <- c(100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000)
+  h <- 0
+  m <- "exp"
+  t <- FALSE
+  bs <- 1
+  be <- 7
+
+  result <- handleASD(deaths, population, h, m, t, bs, be)
+
+  check_asd_result(result, length(deaths))
+
+  # ETS should produce smoothed forecasts
+  # Post-baseline asd_bl should be calculated
+  expect_true(all(!is.na(result$asd_bl[8:10])))
+})
+
+test_that("handleASD with baseline parameters works", {
+  # Baseline period has lower death rate, post-baseline has higher
+  deaths <- c(1000, 1020, 1010, 1030, 1500, 1550, 1600)
+  population <- c(100000, 100000, 100000, 100000, 100000, 100000, 100000)
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+  bs <- 1
+  be <- 4  # Baseline is first 4 periods
+
+  result <- handleASD(deaths, population, h, m, t, bs, be)
+
+  check_asd_result(result, length(deaths))
+
+  # Post-baseline z-scores should be positive (deaths higher than expected)
+  expect_true(result$zscore[5] > 0)
+  expect_true(result$zscore[6] > 0)
+  expect_true(result$zscore[7] > 0)
+})
+
+test_that("handleASD correctly calculates expected deaths with population changes", {
+  # Key test: same mortality rate, but population doubles
+  # Baseline period has rate = 0.01 (1%)
+  # Expected deaths should scale with population
+  deaths <- c(100, 100, 100, 200, 200)  # Rate stays at 1%
+  population <- c(10000, 10000, 10000, 20000, 20000)  # Population doubles
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+  bs <- 1
+  be <- 3
+
+  result <- handleASD(deaths, population, h, m, t, bs, be)
+
+  check_asd_result(result, length(deaths))
+
+  # Expected deaths for period 4 and 5 should be ~200 (rate 0.01 * pop 20000)
+  # This is because we apply baseline rate to current population
+  expect_equal(result$asd_bl[4], 200, tolerance = 1)
+  expect_equal(result$asd_bl[5], 200, tolerance = 1)
+
+  # Z-scores should be close to 0 since deaths match expected
+  expect_true(abs(result$zscore[4]) < 0.5)
+  expect_true(abs(result$zscore[5]) < 0.5)
+})
+
+test_that("handleASD detects excess mortality due to rate change", {
+  # Baseline: rate = 0.01, Post-baseline: rate increases to 0.015
+  deaths <- c(100, 100, 100, 150, 150)  # Rate increases from 1% to 1.5%
+  population <- c(10000, 10000, 10000, 10000, 10000)  # Population constant
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+  bs <- 1
+  be <- 3
+
+  result <- handleASD(deaths, population, h, m, t, bs, be)
+
+  # Post-baseline expected deaths should still be ~100 (baseline rate * pop)
+  expect_equal(result$asd_bl[4], 100, tolerance = 1)
+
+  # But actual deaths are 150, so z-score should be strongly positive
+  expect_true(result$zscore[4] > 2)  # More than 2 SDs above expected
+  expect_true(result$zscore[5] > 2)
+})
+
+test_that("handleASD with forecast horizon extends output", {
+  deaths <- c(1000, 1050, 1100, 1080, 1120)
+  population <- c(100000, 101000, 102000, 103000, 104000)
+  h <- 3  # Forecast 3 periods beyond data
+  m <- "mean"
+  t <- FALSE
+
+  result <- handleASD(deaths, population, h, m, t)
+
+  # Output should be extended by h periods
+  check_asd_result(result, length(deaths) + h)
+
+  # Forecast deaths should be NA
+  expect_true(all(is.na(tail(result$asd, h))))
+
+  # Forecast expected deaths should use last known population
+  expect_true(all(!is.na(tail(result$asd_bl, h))))
+
+  # Forecast z-scores should be NA (no observed data to compare)
+  expect_true(all(is.na(tail(result$zscore, h))))
+})
+
+test_that("handleASD with lin_reg extrapolates trend correctly", {
+  # Declining mortality rate
+  # Rate: 0.012, 0.011, 0.010, 0.009, 0.008 (linear decline)
+  deaths <- c(120, 110, 100, 90, 80)
+  population <- c(10000, 10000, 10000, 10000, 10000)
+  h <- 0
+  m <- "lin_reg"
+  t <- TRUE
+  bs <- 1
+  be <- 3  # Fit trend on first 3
+
+  result <- handleASD(deaths, population, h, m, t, bs, be)
+
+  check_asd_result(result, length(deaths))
+
+  # Expected deaths for period 4 should follow the trend (~90)
+  # and period 5 should follow trend (~80)
+  expect_true(result$asd_bl[4] < result$asd_bl[3])
+  expect_true(result$asd_bl[5] < result$asd_bl[4])
+})
+
+test_that("handleASD prediction intervals are valid", {
+  deaths <- c(1000, 1050, 1100, 1080, 1120, 1150, 1200)
+  population <- c(100000, 100000, 100000, 100000, 100000, 100000, 100000)
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+  bs <- 1
+  be <- 4
+
+  result <- handleASD(deaths, population, h, m, t, bs, be)
+
+  # PI should be NA for baseline period
+  expect_true(all(is.na(result$lower[1:4])))
+  expect_true(all(is.na(result$upper[1:4])))
+
+  # PI should exist for post-baseline
+  expect_true(all(!is.na(result$lower[5:7])))
+  expect_true(all(!is.na(result$upper[5:7])))
+
+  # Lower should be less than upper
+  for (i in 5:7) {
+    expect_true(result$lower[i] < result$upper[i])
+  }
+
+  # asd_bl should be within PI bounds
+  for (i in 5:7) {
+    expect_true(result$asd_bl[i] >= result$lower[i])
+    expect_true(result$asd_bl[i] <= result$upper[i])
+  }
+})
+
+test_that("handleASD handles leading NAs correctly", {
+  deaths <- c(NA, NA, 1000, 1050, 1100, 1150, 1200)
+  population <- c(100000, 100000, 100000, 100000, 100000, 100000, 100000)
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+
+  result <- handleASD(deaths, population, h, m, t)
+
+  check_asd_result(result, length(deaths))
+
+  # Leading NAs should be preserved
+  expect_true(is.na(result$asd_bl[1]))
+  expect_true(is.na(result$asd_bl[2]))
+
+  # Non-NA values should be calculated
+  expect_true(all(!is.na(result$asd_bl[3:7])))
+})
+
+test_that("handleASD rounds output correctly", {
+  deaths <- c(1000.123, 1050.456, 1100.789, 1080.111, 1120.222)
+  population <- c(100000.5, 100100.5, 100200.5, 100300.5, 100400.5)
+  h <- 0
+  m <- "mean"
+  t <- FALSE
+
+  result <- handleASD(deaths, population, h, m, t)
+
+  # asd and asd_bl should be rounded to 2 decimals
+  for (val in result$asd) {
+    if (!is.na(val)) {
+      val_str <- as.character(val)
+      if (grepl("\\.", val_str)) {
+        decimals <- nchar(strsplit(val_str, "\\.")[[1]][2])
+        expect_true(decimals <= 2)
+      }
+    }
+  }
+
+  # zscore should be rounded to 3 decimals
+  for (z in result$zscore) {
+    if (!is.na(z)) {
+      z_str <- as.character(z)
+      if (grepl("\\.", z_str)) {
+        decimals <- nchar(strsplit(z_str, "\\.")[[1]][2])
+        expect_true(decimals <= 3)
+      }
+    }
+  }
+})
+
+test_that("handleASD errors on invalid method", {
+  deaths <- c(1000, 1050, 1100, 1080, 1120)
+  population <- c(100000, 100000, 100000, 100000, 100000)
+
+  expect_error(
+    handleASD(deaths, population, 0, "invalid_method", FALSE),
+    "Unknown method for ASD"
+  )
+})
+
 message("\nHandler tests completed!")

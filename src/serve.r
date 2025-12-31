@@ -146,32 +146,167 @@ log_message <- function(level, message, details = NULL) {
   print(log_entry)
 }
 
+#' Parse numeric array parameter
+#'
+#' @param param Parameter value (string, list, or numeric)
+#' @return Numeric vector or NULL on error
+parse_numeric_array <- function(param) {
+  tryCatch({
+    if (is.character(param)) {
+      as.double(strsplit(as.character(param), ",")[[1]])
+    } else if (is.list(param)) {
+      # Convert NULL to NA to preserve array positions (unlist() strips NULLs)
+      sapply(param, function(x) if (is.null(x)) NA_real_ else as.double(x))
+    } else if (is.numeric(param)) {
+      as.double(param)
+    } else {
+      as.double(param)
+    }
+  }, error = function(e) NULL)
+}
+
+#' Validate ASD (Age-Standardized Deaths) request parameters
+#'
+#' @param query Query parameters from request
+#' @return List with valid=TRUE/FALSE and error message if invalid
+validate_asd_request <- function(query) {
+  # Check for required 'deaths' parameter
+  if (is.null(query$deaths)) {
+    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'deaths'"))
+  }
+
+  # Check for required 'population' parameter
+  if (is.null(query$population)) {
+    return(list(valid = FALSE, status = 400, message = "Missing required parameter 'population'"))
+  }
+
+  # Parse deaths array
+  deaths <- parse_numeric_array(query$deaths)
+  if (is.null(deaths)) {
+    return(list(
+      valid = FALSE, status = 400,
+      message = "Parameter 'deaths' must be comma-separated numeric values or a numeric array"
+    ))
+  }
+
+  # Parse population array
+  population <- parse_numeric_array(query$population)
+  if (is.null(population)) {
+    return(list(
+      valid = FALSE, status = 400,
+      message = "Parameter 'population' must be comma-separated numeric values or a numeric array"
+    ))
+  }
+
+  # Check arrays have same length
+  if (length(deaths) != length(population)) {
+    return(list(
+      valid = FALSE, status = 400,
+      message = paste0(
+        "Parameters 'deaths' and 'population' must have same length. ",
+        "deaths has ", length(deaths), " elements, population has ", length(population)
+      )
+    ))
+  }
+
+  # Check minimum data points
+  valid_deaths <- deaths[!is.na(deaths)]
+  if (length(valid_deaths) < 3) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'deaths' must contain at least 3 valid data points"))
+  }
+
+  # Check maximum array size (prevent DOS)
+  if (length(deaths) > 10000) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'deaths' exceeds maximum length of 10000"))
+  }
+
+  # Check population has no zeros or negatives (would cause division errors)
+  valid_population <- population[!is.na(population)]
+  if (any(valid_population <= 0)) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'population' must contain only positive values"))
+  }
+
+  # Validate 'm' (method) - all baseline methods supported for ASD
+  m <- query$m
+  if (is.null(m) || !m %in% c("naive", "mean", "median", "lin_reg", "exp")) {
+    return(list(
+      valid = FALSE,
+      status = 400,
+      message = "Parameter 'm' must be one of: naive, mean, median, lin_reg, exp"
+    ))
+  }
+
+  # Validate 'h' (horizon) - optional, default 0 for ASD
+  h <- as.integer(query$h %||% 0)
+  if (is.na(h) || h < 0 || h > 1000) {
+    return(list(valid = FALSE, status = 400, message = "Parameter 'h' must be a non-negative integer between 0 and 1000"))
+  }
+
+  # Validate baseline parameters if provided
+  if (!is.null(query$bs) || !is.null(query$be)) {
+    if (is.null(query$bs) || is.null(query$be)) {
+      return(list(
+        valid = FALSE,
+        status = 400,
+        message = "Parameters 'bs' and 'be' must both be provided together"
+      ))
+    }
+
+    bs <- tryCatch(as.integer(query$bs), error = function(e) NA)
+    be <- tryCatch(as.integer(query$be), error = function(e) NA)
+
+    if (is.na(bs)) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'bs' must be an integer"))
+    }
+    if (is.na(be)) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'be' must be an integer"))
+    }
+    if (bs < 1) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'bs' must be >= 1"))
+    }
+    if (be <= bs) {
+      return(list(valid = FALSE, status = 400, message = "Parameter 'be' must be > 'bs'"))
+    }
+    if (be > length(deaths)) {
+      msg <- paste0(
+        "Parameter 'be' (", be, ") must be <= data length (", length(deaths), ")"
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
+    }
+
+    # Validate that baseline period has sufficient non-NA values
+    baseline_data <- deaths[bs:be]
+    non_na_count <- sum(!is.na(baseline_data))
+    if (non_na_count < 3) {
+      msg <- paste0(
+        "Baseline period (deaths[", bs, ":", be, "]) contains only ", non_na_count,
+        " non-NA values. At least 3 non-NA values are required."
+      )
+      return(list(valid = FALSE, status = 400, message = msg))
+    }
+  }
+
+  return(list(valid = TRUE))
+}
+
 #' Validate request parameters
 #'
 #' @param query Query parameters from request (may include POST body params)
 #' @param path Request path
 #' @return List with valid=TRUE/FALSE and error message if invalid
 validate_request <- function(query, path) {
+  # ASD endpoint has different required parameters
+  if (path == "/asd") {
+    return(validate_asd_request(query))
+  }
+
   # Check for required 'y' parameter
   if (is.null(query$y)) {
     return(list(valid = FALSE, status = 400, message = "Missing required parameter 'y'"))
   }
 
   # Validate 'y' can be parsed as numeric
-  # Handle both comma-separated string (GET) and numeric array (POST)
-  y_param <- query$y
-  y <- tryCatch({
-    if (is.character(y_param)) {
-      as.double(strsplit(as.character(y_param), ",")[[1]])
-    } else if (is.list(y_param)) {
-      # Convert NULL to NA to preserve array positions (unlist() strips NULLs)
-      sapply(y_param, function(x) if (is.null(x)) NA_real_ else as.double(x))
-    } else if (is.numeric(y_param)) {
-      as.double(y_param)
-    } else {
-      as.double(y_param)
-    }
-  }, error = function(e) NULL)
+  y <- parse_numeric_array(query$y)
 
   if (is.null(y)) {
     return(list(
@@ -499,9 +634,9 @@ app$on("request", function(server, request, ...) {
   }
 
   # Check if route exists (before parameter validation)
-  if (!request$path %in% c("/", "/cum")) {
+  if (!request$path %in% c("/", "/cum", "/asd")) {
     log_message("WARN", "Route not found", list(path = request$path, ip = client_ip))
-    return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /health"))
+    return(send_error(server, request, 404, "Route not found. Available routes: /, /cum, /asd, /health"))
   }
 
   # Validate request (use merged params for POST support)
@@ -532,21 +667,8 @@ app$on("request", function(server, request, ...) {
     return(response)
   }
 
-  # Parse parameters (use merged_params for POST support)
-  # Handle 'y' as either comma-separated string (GET) or numeric array (POST)
-  y_param <- merged_params$y
-  if (is.character(y_param)) {
-    y <- as.double(strsplit(as.character(y_param), ",")[[1]])
-  } else if (is.list(y_param)) {
-    # Convert NULL to NA to preserve array positions (unlist() strips NULLs)
-    y <- sapply(y_param, function(x) if (is.null(x)) NA_real_ else as.double(x))
-  } else if (is.numeric(y_param)) {
-    y <- as.double(y_param)
-  } else {
-    y <- as.double(y_param)
-  }
-
-  h <- as.integer(merged_params$h %||% 1)
+  # Parse common parameters
+  h <- as.integer(merged_params$h %||% if (request$path == "/asd") 0 else 1)
   t <- as.integer(merged_params$t %||% 0) == 1
 
   # Parse baseline parameters: bs/be (new) or b (legacy)
@@ -561,17 +683,24 @@ app$on("request", function(server, request, ...) {
     be <- as.integer(merged_params$b)
   }
 
-  # Parse xs (start time index) - optional
-  xs <- merged_params$xs
-
   # Process request with error handling
   res <- tryCatch({
-    if (request$path == "/") {
+    if (request$path == "/asd") {
+      # ASD endpoint: parse deaths and population
+      deaths <- parse_numeric_array(merged_params$deaths)
+      population <- parse_numeric_array(merged_params$population)
+      m <- merged_params$m
+      handleASD(deaths, population, h, m, t, bs, be)
+    } else if (request$path == "/") {
+      # Standard forecast endpoint: parse y
+      y <- parse_numeric_array(merged_params$y)
       m <- merged_params$m
       s <- as.integer(merged_params$s)
+      xs <- merged_params$xs
       handleForecast(y, h, m, s, t, bs, be, xs)
     } else {
-      # request$path == "/cum" (already validated above)
+      # /cum endpoint: parse y
+      y <- parse_numeric_array(merged_params$y)
       handleCumulativeForecast(y, h, t, bs, be)
     }
   }, error = function(e) {
